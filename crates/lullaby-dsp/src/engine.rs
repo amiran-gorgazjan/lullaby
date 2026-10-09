@@ -29,7 +29,9 @@ struct Channel {
     spectrum: Vec<Complex32>,
     detector: Vec<Complex32>,
     filter: Vec<Complex32>,
-    prefix: Vec<f32>,
+    amplitude_sum: Vec<f64>,
+    power_sum: Vec<f64>,
+    magnitude: Vec<f32>,
     magnitude_db: Vec<f32>,
     reduction: Vec<f32>,
     weight: Vec<f32>,
@@ -45,7 +47,9 @@ impl Channel {
             spectrum: vec![Complex32::default(); n],
             detector: vec![Complex32::default(); n],
             filter: vec![Complex32::default(); n],
-            prefix: vec![0.0; n / 2 + 2],
+            amplitude_sum: vec![0.0; n / 2 + 2],
+            power_sum: vec![0.0; n / 2 + 2],
+            magnitude: vec![0.0; n / 2 + 1],
             magnitude_db: vec![0.0; n / 2 + 1],
             reduction: vec![0.0; n / 2 + 1],
             weight: vec![0.0; n / 2 + 1],
@@ -85,6 +89,7 @@ pub struct Engine {
     attack: Vec<f32>,
     release: Vec<f32>,
     radius: Vec<usize>,
+    threshold: Vec<f32>,
     audition_mask: Vec<f32>,
     cached: Option<Settings>,
     mix: f32,
@@ -92,6 +97,7 @@ pub struct Engine {
     gain: f32,
     target_trim: f32,
     target_gain: f32,
+    depth_amount: f32,
     bypass: f32,
     delta: f32,
     listen: f32,
@@ -132,6 +138,7 @@ impl Engine {
             attack: vec![0.0; n / 2 + 1],
             release: vec![0.0; n / 2 + 1],
             radius: vec![0; n / 2 + 1],
+            threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
             cached: None,
             mix: 1.0,
@@ -139,6 +146,7 @@ impl Engine {
             gain: 1.0,
             target_trim: 1.0,
             target_gain: 1.0,
+            depth_amount: 0.0,
             bypass: 0.0,
             delta: 0.0,
             listen: 0.0,
@@ -190,6 +198,10 @@ impl Engine {
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
             let detail = (s.detail + 0.5 * tilt(s.detail_tilt)).clamp(0.0, 1.0);
             self.radius[k] = ((k as f32 * (0.7 - 0.6 * detail)) as usize).max(4);
+            // Detail tilt must affect detection selectivity as well as bandwidth.
+            // Higher depth gradually admits less prominent peaks, while the
+            // default leaves ordinary windowed sinusoidal lobes alone.
+            self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
             // Mild frequency-dependent response, independently tilted at either end.
             let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
             let coefficient = |ms: f32, t: [f32; 2]| {
@@ -209,6 +221,9 @@ impl Engine {
         }
         self.target_trim = db_to_gain(s.wet_trim_db);
         self.target_gain = db_to_gain(s.output_db);
+        // Preserve the host's 0..24 scale but give it a useful gentle region:
+        // depth 0/6/12/24 -> 0/0.25/0.75/3.75 times detected excess in dB.
+        self.depth_amount = ((s.depth / 6.0).exp2() - 1.0) * 0.25;
         if first {
             self.mix = s.mix;
             self.trim = db_to_gain(s.wet_trim_db);
@@ -320,27 +335,37 @@ impl Engine {
             };
             for (c, p) in power.iter().enumerate() {
                 let linked = *p + s.link * (shared - *p);
-                self.channels[c].magnitude_db[k] =
-                    gain_to_db(linked.max(0.0).sqrt() * norm).max(-150.0);
+                let magnitude = linked.max(0.0).sqrt() * norm;
+                self.channels[c].magnitude[k] = magnitude;
+                self.channels[c].magnitude_db[k] = gain_to_db(magnitude).max(-150.0);
             }
         }
         self.meter.peak_reduction_db = 0.0;
         for ch in &mut self.channels {
-            ch.prefix[0] = 0.0;
+            ch.amplitude_sum[0] = 0.0;
+            ch.power_sum[0] = 0.0;
             let peak = ch.magnitude_db.iter().copied().fold(-150.0_f32, f32::max);
-            // A moving relative floor keeps sparse signals from producing extreme ratios.
+            // The reference is an amplitude-weighted local amplitude mean,
+            // sum(amplitude^2) / sum(amplitude). Unlike a mean of decibels,
+            // empty gaps between musical harmonics cannot drag it down toward
+            // the noise floor and make every harmonic appear resonant.
+            // f64 prefix sums retain quiet treble after large bass bins.
             let floor = (peak - 60.0).max(-140.0);
             for k in 0..bins {
-                ch.prefix[k + 1] = ch.prefix[k] + ch.magnitude_db[k].max(floor);
+                let amplitude = f64::from(ch.magnitude[k]);
+                ch.amplitude_sum[k + 1] = ch.amplitude_sum[k] + amplitude;
+                ch.power_sum[k + 1] = ch.power_sum[k] + amplitude * amplitude;
             }
             for k in 0..bins {
                 let lo = k.saturating_sub(self.radius[k]).max(1).min(bins - 1);
                 let hi = (k + self.radius[k] + 1).min(bins).max(lo + 1);
-                let baseline = (ch.prefix[hi] - ch.prefix[lo]) / (hi - lo) as f32;
-                let prominence = (ch.magnitude_db[k] - baseline - (8.0 - 5.0 * s.detail)).max(0.0);
+                let amplitude = (ch.amplitude_sum[hi] - ch.amplitude_sum[lo]).max(1e-20);
+                let power = (ch.power_sum[hi] - ch.power_sum[lo]).max(0.0);
+                let baseline = gain_to_db((power / amplitude) as f32);
+                let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0);
                 let activity = ((ch.magnitude_db[k] - floor - 3.0) / 12.0).clamp(0.0, 1.0);
                 let requested = match s.mode {
-                    Mode::Soft => prominence * s.depth * 0.16,
+                    Mode::Soft => prominence * self.depth_amount,
                     Mode::Hard => {
                         prominence.min((ch.magnitude_db[k] + 24.0 + s.depth * 2.0).max(0.0))
                             * s.depth

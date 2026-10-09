@@ -78,7 +78,7 @@ impl LullabyEditor {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 toggle(ui, &params.bypass, setter, "Bypass");
-                ui.label(RichText::new("0.1").color(MUTED));
+                ui.label(RichText::new(env!("CARGO_PKG_VERSION")).color(MUTED));
             });
         });
         ui.add_space(6.0);

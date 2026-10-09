@@ -37,7 +37,7 @@ in `Cargo.toml`. The project uses Rust 1.95 for egui 0.36 compatibility.
 
 | Area | Implementation |
 | --- | --- |
-| Detector | Local log-spectrum prominence, relative activity floor; separate absolute-level hard detector |
+| Detector | Local spectral prominence against an amplitude-weighted reference, relative activity floor; additional absolute-level condition in hard mode |
 | Suppression | Per-bin attack/release, bounded attenuation, continuously updated FFT filter |
 | Phase | Real spectral gains, or causal real-cepstrum minimum-phase reconstruction per frame |
 | Weighting | Eight editable bands: bell, two shelves, two cuts, parallel pass bands, rejection and tilt; per-band focus |
@@ -57,6 +57,11 @@ performed. The detector equations, parameter scales and transfer curves are our
 own. Minimum-phase reconstruction is embedded in a time-varying WOLA system;
 it is not equivalent to a bank of continuously running analog-style notches.
 Linear phase describes the per-frame filter, not a time-invariant overall system.
+
+Version 0.1.1 recalibrates detection and soft-mode Depth after a user reported
+excessive broadband reduction. The cause, synthetic measurements and regression
+coverage are recorded in [DSP calibration](dsp-calibration.md). These measurements
+validate Lullaby against its own intended behavior, not against Soothe.
 
 Low latency is **512 samples**, not zero. Other modes are **2048 samples**; phase
 choice does not change reported latency. FFT sizes stay fixed at all sample

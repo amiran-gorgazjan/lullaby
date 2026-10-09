@@ -155,6 +155,9 @@ fn silent_external_sidechain_does_not_reduce_main_input() {
 fn external_key_triggers_reduction() {
     let s = Settings {
         external_sidechain: true,
+        // Deliberately request strong processing. The default must not remove
+        // several dB from an otherwise ordinary pair of musical tones.
+        depth: 18.0,
         ..Settings::default()
     };
     let (_, e) = render(s, 16000, signal, signal);

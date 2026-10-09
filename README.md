@@ -33,11 +33,19 @@ AU, which is not provided; use a VST3/CLAP-compatible host.
 
 ## Use
 
+Version **0.1.1** corrects excessive suppression in the original default and
+recalibrates soft-mode Depth. See the [measurements and explanation](docs/dsp-calibration.md).
+Existing presets and sessions load, but their processing will sound different.
+After replacing the installed bundle, restart your DAW and check the version
+in the editor to ensure it has loaded the update.
+
 1. Start with **Gentle start**. Raise **Depth**, then back it off until reduction
    is subtle. **Detail** controls the local spectral neighborhood used to find peaks.
 2. Double-click the graph to add a weighting band; drag its node to change
    frequency and emphasis. Scroll over it to change width. Select a numbered
    band below the graph to edit its shape, focus or enabled state.
+   A bell increases or decreases sensitivity locally; a flat curve still permits
+   processing elsewhere. Use the cut or pass-band shapes to restrict the range.
 3. **Delta** auditions what the filter removes. **Audition Δ** narrows this to
    the selected band. Both are measured before wet trim, mix and output gain.
 4. **Link** blends independent and shared detection. **Focus** moves processing
@@ -78,6 +86,9 @@ current OS, or accepts a binary path. It checks native loading, both export
 symbols, CLAP parameters/state, and latency-aligned processing with varying
 block sizes. DSP tests cover reconstruction, suppression, stereo, sidechain,
 monitoring, sanitization, presets and zero allocations during processing.
+Calibration tests check gentle defaults on ordinary harmonics and noise, local
+preset emphasis and progressive Depth response. A VST3 factory integration test
+checks host parameter conversion and audio output against the standalone engine.
 
 The GitHub Actions workflow builds, tests and uploads bundles on all three OSes.
 It must run in your repository before claiming Windows/Linux validation. Local
