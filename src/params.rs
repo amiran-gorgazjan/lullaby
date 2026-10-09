@@ -1,0 +1,393 @@
+use lullaby_dsp::*;
+use nice_plug::prelude::*;
+
+#[derive(Params)]
+pub struct LullabyParams {
+    #[id = "depth"]
+    pub depth: FloatParam,
+    #[id = "detail"]
+    pub detail: FloatParam,
+    #[id = "attack_ms"]
+    pub attack_ms: FloatParam,
+    #[id = "release_ms"]
+    pub release_ms: FloatParam,
+    #[id = "max_cut_db"]
+    pub max_cut_db: FloatParam,
+    #[id = "link"]
+    pub link: FloatParam,
+    #[id = "focus"]
+    pub focus: FloatParam,
+    #[id = "detail_low"]
+    pub detail_low: FloatParam,
+    #[id = "detail_high"]
+    pub detail_high: FloatParam,
+    #[id = "attack_low"]
+    pub attack_low: FloatParam,
+    #[id = "attack_high"]
+    pub attack_high: FloatParam,
+    #[id = "release_low"]
+    pub release_low: FloatParam,
+    #[id = "release_high"]
+    pub release_high: FloatParam,
+    #[id = "mix"]
+    pub mix: FloatParam,
+    #[id = "wet_trim_db"]
+    pub wet_trim_db: FloatParam,
+    #[id = "output_db"]
+    pub output_db: FloatParam,
+    #[id = "bypass"]
+    pub bypass: BoolParam,
+    #[id = "delta"]
+    pub delta: BoolParam,
+    #[id = "external_sidechain"]
+    pub external_sidechain: BoolParam,
+    #[id = "sidechain_listen"]
+    pub sidechain_listen: BoolParam,
+    #[id = "mode"]
+    pub mode: IntParam,
+    #[id = "stereo_mode"]
+    pub stereo_mode: IntParam,
+    #[id = "phase"]
+    pub phase: IntParam,
+    #[id = "quality"]
+    pub quality: IntParam,
+    #[id = "listen_band"]
+    pub listen_band: IntParam,
+    #[nested(array, group = "Band")]
+    pub bands: [BandParams; BAND_COUNT],
+}
+
+impl Default for LullabyParams {
+    fn default() -> Self {
+        Self {
+            depth: FloatParam::new(
+                "Depth",
+                6.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 24.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            detail: FloatParam::new("Detail", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit("")
+                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            attack_ms: FloatParam::new(
+                "Attack",
+                10.0,
+                FloatRange::Skewed {
+                    min: 0.1,
+                    max: 500.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            release_ms: FloatParam::new(
+                "Release",
+                120.0,
+                FloatRange::Skewed {
+                    min: 5.0,
+                    max: 2000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            max_cut_db: FloatParam::new(
+                "Max cut",
+                12.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 36.0,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            link: FloatParam::new(
+                "Stereo link",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            focus: FloatParam::new(
+                "Stereo focus",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            detail_low: FloatParam::new(
+                "Detail / low",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            detail_high: FloatParam::new(
+                "Detail / high",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            attack_low: FloatParam::new(
+                "Attack / low",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            attack_high: FloatParam::new(
+                "Attack / high",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            release_low: FloatParam::new(
+                "Release / low",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            release_high: FloatParam::new(
+                "Release / high",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit("")
+                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            wet_trim_db: FloatParam::new(
+                "Wet trim",
+                0.0,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            output_db: FloatParam::new(
+                "Output",
+                0.0,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            bypass: BoolParam::new("Bypass", false).make_bypass(),
+            delta: BoolParam::new("Delta", false),
+            external_sidechain: BoolParam::new("External sidechain", false),
+            sidechain_listen: BoolParam::new("Listen to sidechain", false),
+            mode: IntParam::new("Mode", 0, IntRange::Linear { min: 0, max: 1 })
+                .with_value_to_string(std::sync::Arc::new(|v| {
+                    ["Soft", "Hard"][v as usize].to_owned()
+                })),
+            stereo_mode: IntParam::new("Channels", 0, IntRange::Linear { min: 0, max: 1 })
+                .with_value_to_string(std::sync::Arc::new(|v| {
+                    ["L/R", "M/S"][v as usize].to_owned()
+                })),
+            phase: IntParam::new("Phase", 0, IntRange::Linear { min: 0, max: 1 })
+                .with_value_to_string(std::sync::Arc::new(|v| {
+                    ["Minimum", "Linear"][v as usize].to_owned()
+                })),
+            quality: IntParam::new("Quality", 0, IntRange::Linear { min: 0, max: 3 })
+                .with_value_to_string(std::sync::Arc::new(|v| {
+                    ["Normal", "High", "Ultra", "Low latency"][v as usize].to_owned()
+                }))
+                .non_automatable(),
+            listen_band: IntParam::new("Band audition", -1, IntRange::Linear { min: -1, max: 7 })
+                .non_automatable(),
+            bands: std::array::from_fn(BandParams::new),
+        }
+    }
+}
+
+impl LullabyParams {
+    pub fn snapshot(&self) -> Settings {
+        Settings {
+            depth: self.depth.value(),
+            detail: self.detail.value(),
+            attack_ms: self.attack_ms.value(),
+            release_ms: self.release_ms.value(),
+            max_cut_db: self.max_cut_db.value(),
+            link: self.link.value(),
+            focus: self.focus.value(),
+            mix: self.mix.value(),
+            wet_trim_db: self.wet_trim_db.value(),
+            output_db: self.output_db.value(),
+            bypass: self.bypass.value(),
+            delta: self.delta.value(),
+            external_sidechain: self.external_sidechain.value(),
+            sidechain_listen: self.sidechain_listen.value(),
+            mode: [Mode::Soft, Mode::Hard][self.mode.value() as usize],
+            stereo_mode: [StereoMode::LeftRight, StereoMode::MidSide]
+                [self.stereo_mode.value() as usize],
+            phase: [Phase::Minimum, Phase::Linear][self.phase.value() as usize],
+            quality: [
+                Quality::Normal,
+                Quality::High,
+                Quality::Ultra,
+                Quality::LowLatency,
+            ][self.quality.value() as usize],
+            detail_tilt: [self.detail_low.value(), self.detail_high.value()],
+            attack_tilt: [self.attack_low.value(), self.attack_high.value()],
+            release_tilt: [self.release_low.value(), self.release_high.value()],
+            listen_band: self.listen_band.value(),
+            bands: std::array::from_fn(|i| self.bands[i].snapshot()),
+        }
+    }
+
+    pub fn apply(&self, s: Settings, setter: &ParamSetter) {
+        let s = s.sanitized();
+        set(setter, &self.depth, s.depth);
+        set(setter, &self.detail, s.detail);
+        set(setter, &self.attack_ms, s.attack_ms);
+        set(setter, &self.release_ms, s.release_ms);
+        set(setter, &self.max_cut_db, s.max_cut_db);
+        set(setter, &self.link, s.link);
+        set(setter, &self.focus, s.focus);
+        set(setter, &self.detail_low, s.detail_tilt[0]);
+        set(setter, &self.detail_high, s.detail_tilt[1]);
+        set(setter, &self.attack_low, s.attack_tilt[0]);
+        set(setter, &self.attack_high, s.attack_tilt[1]);
+        set(setter, &self.release_low, s.release_tilt[0]);
+        set(setter, &self.release_high, s.release_tilt[1]);
+        set(setter, &self.mix, s.mix);
+        set(setter, &self.wet_trim_db, s.wet_trim_db);
+        set(setter, &self.output_db, s.output_db);
+        set(setter, &self.bypass, s.bypass);
+        set(setter, &self.delta, s.delta);
+        set(setter, &self.external_sidechain, s.external_sidechain);
+        set(setter, &self.sidechain_listen, s.sidechain_listen);
+        set(setter, &self.mode, s.mode as i32);
+        set(setter, &self.stereo_mode, s.stereo_mode as i32);
+        set(setter, &self.phase, s.phase as i32);
+        set(setter, &self.quality, s.quality as i32);
+        set(setter, &self.listen_band, s.listen_band);
+        for (p, band) in self.bands.iter().zip(s.bands) {
+            p.apply(band, setter);
+        }
+    }
+}
+
+pub fn set<P: Param>(setter: &ParamSetter, param: &P, value: P::Plain) {
+    setter.begin_set_parameter(param);
+    setter.set_parameter(param, value);
+    setter.end_set_parameter(param);
+}
+
+#[derive(Params)]
+pub struct BandParams {
+    #[id = "band_enabled"]
+    pub enabled: BoolParam,
+    #[id = "band_shape"]
+    pub shape: IntParam,
+    #[id = "band_frequency"]
+    pub frequency: FloatParam,
+    #[id = "band_depth_db"]
+    pub depth_db: FloatParam,
+    #[id = "band_width"]
+    pub width: FloatParam,
+    #[id = "band_focus"]
+    pub focus: FloatParam,
+}
+
+impl BandParams {
+    fn new(i: usize) -> Self {
+        Self {
+            enabled: BoolParam::new("Enabled", false),
+            shape: IntParam::new("Shape", 0, IntRange::Linear { min: 0, max: 7 }),
+            frequency: FloatParam::new(
+                "Frequency",
+                [100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 12000.0][i],
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 20000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(1))
+            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            depth_db: FloatParam::new(
+                "Weight",
+                0.0,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            width: FloatParam::new("Width", 1.0, FloatRange::Linear { min: 0.1, max: 4.0 })
+                .with_unit(" oct")
+                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            focus: FloatParam::new(
+                "Focus",
+                0.0,
+                FloatRange::Linear {
+                    min: -1.0,
+                    max: 1.0,
+                },
+            )
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+        }
+    }
+    pub fn snapshot(&self) -> Band {
+        Band {
+            enabled: self.enabled.value(),
+            shape: [
+                BandShape::Bell,
+                BandShape::LowShelf,
+                BandShape::HighShelf,
+                BandShape::LowCut,
+                BandShape::HighCut,
+                BandShape::BandPass,
+                BandShape::BandReject,
+                BandShape::Tilt,
+            ][self.shape.value() as usize],
+            frequency: self.frequency.value(),
+            depth_db: self.depth_db.value(),
+            width: self.width.value(),
+            focus: self.focus.value(),
+        }
+    }
+    pub fn apply(&self, b: Band, setter: &ParamSetter) {
+        set(setter, &self.enabled, b.enabled);
+        set(setter, &self.shape, b.shape as i32);
+        set(setter, &self.frequency, b.frequency);
+        set(setter, &self.depth_db, b.depth_db);
+        set(setter, &self.width, b.width);
+        set(setter, &self.focus, b.focus);
+    }
+}

@@ -1,0 +1,5 @@
+/target/
+/.cache/
+*.wav
+.DS_Store
+

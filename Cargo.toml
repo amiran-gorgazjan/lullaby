@@ -1,0 +1,28 @@
+[workspace]
+members = ["crates/lullaby-dsp", "xtask"]
+resolver = "2"
+
+[package]
+name = "lullaby"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "An independent adaptive resonance suppressor"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lullaby-dsp = { path = "crates/lullaby-dsp" }
+nice-plug = "=0.4.2"
+nice-plug-egui = "=0.5.1"
+egui = "0.36.1"
+serde_json = "1.0"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
