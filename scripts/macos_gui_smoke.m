@@ -1,12 +1,14 @@
 // A minimal Cocoa parent for manually checking the real CLAP editor.
-// clang -fobjc-arc -framework Cocoa scripts/macos_gui_smoke.m -o /tmp/lullaby-gui-smoke
+// clang -fobjc-arc -framework Cocoa -framework AVFoundation scripts/macos_gui_smoke.m -o /tmp/lullaby-gui-smoke
 // /tmp/lullaby-gui-smoke "$PWD/target/release/liblullaby.dylib"
 // Close the window to finish. The plugin is never installed into a system folder.
 #import <Cocoa/Cocoa.h>
+#import <AVFoundation/AVFoundation.h>
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <assert.h>
+#include <math.h>
 
 typedef struct { uint32_t major, minor, revision; } Version;
 typedef struct Host Host;
@@ -59,6 +61,7 @@ typedef struct {
 static const Plugin *plugin;
 static const Gui *gui;
 static NSWindow *window;
+static bool processing;
 static void no_op(const Host *h) {}
 static bool resize(const Host *h, uint32_t width, uint32_t height) {
     if (window) [window setContentSize:NSMakeSize(width, height)];
@@ -81,6 +84,7 @@ static void clear_param(const Host *h, uint32_t id, uint32_t flags) {}
 static void flush(const Host *h) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!plugin) return;
+        if (processing) return; // process() consumes pending GUI parameter events.
         const struct { void *count, *info, *get, *to_text, *from_text;
             void (*flush)(const Plugin *, const void *, const void *); } *params = plugin->extension(plugin, "clap.params");
         const struct { void *ctx; uint32_t (*size)(const void *); const void *(*get)(const void *, uint32_t); } in = {NULL, event_count, get_event};
@@ -104,6 +108,53 @@ static void callback(const Host *h) {
 
 @interface Delegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
+
+// Optional, silent analysis of a local fixture exercises the actual DSP/meters.
+// It never opens an audio device or sends sound to the speakers.
+typedef struct {
+    float **data32; double **data64; uint32_t channels, latency; uint64_t constant_mask;
+} ClapAudioBuffer;
+typedef struct {
+    int64_t steady_time; uint32_t frames; const void *transport;
+    const ClapAudioBuffer *inputs; ClapAudioBuffer *outputs; uint32_t input_count, output_count;
+    const void *in_events; const void *out_events;
+} Process;
+
+static NSTimer *start_analysis(NSString *path) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return nil;
+    NSError *error = nil;
+    AVAudioFile *file = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:path]
+        commonFormat:AVAudioPCMFormatFloat32 interleaved:NO error:&error];
+    if (!file || file.processingFormat.channelCount != 2 || file.length < 512) return nil;
+    AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:file.processingFormat
+        frameCapacity:(AVAudioFrameCount)file.length];
+    if (![file readIntoBuffer:buffer error:&error]) return nil;
+    double rate = file.processingFormat.sampleRate;
+    if (!plugin->activate(plugin, rate, 1, 512) || !plugin->start(plugin)) return nil;
+    processing = true;
+    __block uint32_t position = 0;
+    __block int64_t steady = 0;
+    return [NSTimer scheduledTimerWithTimeInterval:512.0 / rate repeats:YES block:^(NSTimer *timer) {
+        float left[512] = {0}, right[512] = {0}, silence[512] = {0};
+        float *main[2] = {buffer.floatChannelData[0] + position, buffer.floatChannelData[1] + position};
+        float *sidechain[2] = {silence, silence};
+        float *output[2] = {left, right};
+        ClapAudioBuffer inputs[2] = {{main, NULL, 2, 0, 0}, {sidechain, NULL, 2, 0, UINT64_MAX}};
+        ClapAudioBuffer outputs[1] = {{output, NULL, 2, 0, 0}};
+        const struct { void *ctx; uint32_t (*size)(const void *); const void *(*get)(const void *, uint32_t); } in = {NULL, event_count, get_event};
+        const struct { void *ctx; bool (*push)(const void *, const void *); } out = {NULL, push_event};
+        Process process = {steady, 512, NULL, inputs, outputs, 2, 1, &in, &out};
+        float peak = 0;
+        for (int i = 0; i < 512; ++i) peak = fmaxf(peak, fabsf(main[0][i]));
+        assert(plugin->process(plugin, &process) != 0);
+        if (steady % 25600 == 0) window.title = [NSString stringWithFormat:
+            @"Lullaby — native CLAP editor · vocal %.1f s · input %.0f dBFS", position / rate,
+            20 * log10(fmaxf(peak, 1e-9))];
+        steady += 512;
+        position += 512;
+        if (position + 512 > buffer.frameLength) position = 0;
+    }];
+}
 @implementation Delegate
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
 - (void)windowDidResize:(NSNotification *)notification {
@@ -116,7 +167,7 @@ static void callback(const Host *h) {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        NSString *libraryPath = argc == 2 ? [NSString stringWithUTF8String:argv[1]] :
+        NSString *libraryPath = argc >= 2 ? [NSString stringWithUTF8String:argv[1]] :
             [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"liblullaby.dylib"];
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -140,14 +191,22 @@ int main(int argc, char **argv) {
             backing:NSBackingStoreBuffered defer:NO];
         window.title = @"Lullaby — native CLAP editor smoke test";
         window.delegate = delegate;
-        window.contentMinSize = NSMakeSize(960, 700);
+        window.contentMinSize = NSMakeSize(960, 640);
         Window parent = {"cocoa", (__bridge void *)window.contentView};
         assert(gui->parent(plugin, &parent));
         assert(gui->show(plugin));
+        NSString *audioPath = argc >= 3 ? [NSString stringWithUTF8String:argv[2]] :
+            [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"preview.wav"];
+        NSTimer *analysis = start_analysis(audioPath);
+        if (analysis) [[NSRunLoop mainRunLoop] addTimer:analysis forMode:NSRunLoopCommonModes];
+        window.title = analysis ? @"Lullaby — native CLAP editor · vocal analysis" :
+            @"Lullaby — native CLAP editor · no audio fixture";
         [window center];
         [window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
         [NSApp run];
+        [analysis invalidate];
+        if (processing) { plugin->stop(plugin); plugin->deactivate(plugin); processing = false; }
         gui->destroy(plugin);
         gui = NULL;
         plugin->destroy(plugin);

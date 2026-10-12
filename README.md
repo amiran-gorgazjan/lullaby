@@ -50,25 +50,47 @@ Version **0.1.2** corrects strong resonances escaping detection, following the
 [vocal-fixture measurements and explanation](docs/resonance-review.md).
 Existing presets and sessions load, but their processing will sound different.
 After replacing the installed bundle, restart your DAW and check the version
-in the editor to ensure it has loaded the update.
+under **Processing** to ensure it has loaded the update.
+
+The editor follows `ui_reference.png` with a textured ivory surface, sage/clay
+controls, sculpted rotary knobs and a large spectrum display. This is a visual
+redesign: the engine, 73 host parameters, preset format and ranges are unchanged.
+**Sharpness** is the existing **Detail** parameter displayed as a percentage;
+**Maximum cut** retains its existing function. The editor opens at 1152×768 and
+scales proportionally down to 960×640.
 
 1. Start with **Gentle start**. Raise **Depth**, then back it off until reduction
-   is subtle. **Detail** controls the local spectral neighborhood used to find peaks.
+   is subtle. **Sharpness** controls the local spectral neighborhood used to find peaks.
 2. Double-click the graph to add a weighting band; drag its node to change
    frequency and emphasis. Scroll over it to change width. Select a numbered
-   band below the graph to edit its shape, focus or enabled state.
+   band in **Spectral bands** in the footer to edit its shape, focus or enabled state.
+   Enabled bands keep their weighting curves and nodes visible in the graph.
    A bell increases or decreases sensitivity locally; a flat curve still permits
    processing elsewhere. Use the cut or pass-band shapes to restrict the range.
 3. **Delta** auditions what the filter removes. **Audition Δ** narrows this to
    the selected band. Both are measured before wet trim, mix and output gain.
-4. **Link** blends independent and shared detection. **Focus** moves processing
+4. Open **Processing** for mode, channels, quality, phase, wet trim, sidechain,
+   frequency tilts and continuous stereo link/focus. **Link** blends independent and shared detection. **Focus** moves processing
    toward left/mid (−1) or right/side (+1). Use **M/S** for stereo material.
 5. Route a DAW sidechain and enable **External SC** to trigger from that input.
    An unconnected or silent external key produces no suppression.
 6. **Mix** blends aligned dry audio with trimmed wet audio. **Bypass** retains
    latency and ignores all gain/monitoring controls for comparison.
 
-Use the preset menu for six starting points. **Preset file…** saves/loads JSON at
+Drag knobs vertically or horizontally; hold Shift for fine changes. Scroll or use
+arrow keys on a focused knob, double-click (or Ctrl/Cmd-click) to reset, and click
+a value to type it. Enter or clicking away applies an entry; Escape cancels it.
+Sharpness and Mix entries use percentages, matching their readouts.
+
+The graph shows the detector spectrum, average suppression and an estimated
+filtered spectrum. The latter reflects displayed reduction, including Mix, but
+excludes wet trim, output gain, bypass and monitoring. With external sidechain
+enabled it represents the key signal. It is not a measurement of final output.
+The graph's top-right menu changes its display floor. Peak reduction is shown
+numerically; right-click the graph to show separate channel reduction curves.
+
+Use the preset menu or arrows for six starting points. The save icon opens
+**Presets & history**, which saves/loads JSON at
 an absolute path you enter; Save overwrites that file. A/B and Undo/Redo last for
 the editor session. Your DAW saves all active sound settings. Quality is locked
 across preset changes by default; disable the lock to recall preset quality.
@@ -120,12 +142,16 @@ validation and host-testing limits are recorded in [validation](docs/validation.
 - `crates/lullaby-dsp`: host-independent engine, weighting curves and tests.
 - `src/lib.rs`: plugin ports, lifecycle, latency and nonblocking meters.
 - `src/params.rs`: stable host parameter IDs and preset mapping.
-- `src/editor.rs`: native egui editor and preset workflow.
+- `src/editor.rs`: native egui editor composition and preset/history workflow.
+- `src/editor/`: shared theme, rotary controls, switches, spectrum and panels.
+- `assets/fonts/`: embedded fonts and their SIL Open Font License notices.
 - `scripts/clap_smoke.py`: native binary host smoke test.
 - `packaging/au`, `scripts/build_au.py`: pinned AUv2 wrapper and macOS build path.
 - `scripts/macos_au_smoke.mm`: native AU loading, state and audio regression tests.
 - `xtask`: cross-platform bundle creation.
 
-Project code is MIT licensed; dependencies retain their licenses. Lullaby is
+Project code is MIT licensed; dependencies retain their licenses. Bundle resources
+include the font notices; keep `FONT-LICENSES.txt` with single-file CLAP distributions.
+Lullaby is
 unaffiliated with oeksound. Soothe is referenced only to explain the requested
 feature research.

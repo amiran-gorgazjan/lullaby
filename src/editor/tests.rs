@@ -1,0 +1,261 @@
+use super::*;
+use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2};
+use std::sync::Mutex;
+
+struct Host {
+    // Own the parameters for the lifetime of every ParamPtr used in a callback.
+    params: Arc<LullabyParams>,
+    events: Mutex<Vec<(&'static str, String, f32)>>,
+}
+impl GuiContextInner for Host {
+    fn plugin_api(&self) -> PluginApi {
+        PluginApi::Clap
+    }
+    unsafe fn raw_begin_set_parameter(&self, param: ParamPtr) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(("begin", unsafe { param.name() }.to_owned(), 0.0));
+    }
+    unsafe fn raw_set_parameter_normalized(&self, param: ParamPtr, value: f32) {
+        assert!((0.0..=1.0).contains(&value));
+        unsafe {
+            param._internal_set_normalized_value(value);
+        }
+        self.events
+            .lock()
+            .unwrap()
+            .push(("set", unsafe { param.name() }.to_owned(), value));
+    }
+    unsafe fn raw_end_set_parameter(&self, param: ParamPtr) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(("end", unsafe { param.name() }.to_owned(), 0.0));
+    }
+    fn get_state(&self) -> PluginState {
+        panic!("UI tests use the public parameter setter")
+    }
+    fn set_state(&self, _state: PluginState) {
+        panic!("UI tests use the public parameter setter")
+    }
+    fn request_restart(&self) {}
+}
+
+struct Harness {
+    editor: LullabyEditor,
+    host: Arc<Host>,
+    gui: GuiContext,
+    ctx: egui::Context,
+    time: f64,
+    size: Vec2,
+}
+impl Harness {
+    fn new(size: Vec2) -> Self {
+        let params = Arc::new(LullabyParams::default());
+        let host = Arc::new(Host {
+            params: params.clone(),
+            events: Mutex::default(),
+        });
+        let ctx = egui::Context::default();
+        let mut editor = LullabyEditor::new(params, Arc::new(Meters::default()));
+        editor.grain = Some(theme::install(&ctx));
+        let mut test = Self {
+            editor,
+            gui: GuiContext::new(host.clone()),
+            host,
+            ctx,
+            time: 0.0,
+            size,
+        };
+        test.frame(vec![], Modifiers::NONE);
+        test
+    }
+    fn frame(&mut self, events: Vec<Event>, modifiers: Modifiers) {
+        self.time += 0.05;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+            time: Some(self.time),
+            events: std::iter::once(Event::ModifiersChanged(modifiers))
+                .chain(events)
+                .collect(),
+            ..Default::default()
+        };
+        let setter = self.gui.param_setter();
+        let mut output = self.ctx.run_ui(input, |ui| self.editor.draw(ui, &setter));
+        assert!(!output.shapes.is_empty());
+        // Headless tests don't upload textures to a GPU.
+        output.textures_delta.clear();
+    }
+    fn pointer(&mut self, pos: Pos2, pressed: bool, modifiers: Modifiers) {
+        self.frame(
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                },
+            ],
+            modifiers,
+        );
+    }
+    fn click(&mut self, pos: Pos2) {
+        self.pointer(pos, true, Modifiers::NONE);
+        self.pointer(pos, false, Modifiers::NONE);
+    }
+    fn key(&mut self, key: egui::Key) {
+        self.frame(
+            vec![Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            Modifiers::NONE,
+        );
+    }
+    fn replace_text(&mut self, text: &str) {
+        self.frame(
+            vec![Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            }],
+            Modifiers::COMMAND,
+        );
+        self.frame(vec![Event::Text(text.into())], Modifiers::NONE);
+    }
+}
+
+#[test]
+fn rotary_drag_keeps_coalesced_release_motion_and_balances_host_gestures() {
+    // Check both native reference coordinates and a host-scaled editor.
+    for (scale, single_frame) in [(1.0, false), (0.625, false), (1.0, true), (0.625, true)] {
+        let mut test = Harness::new(theme::SIZE * scale);
+        let start = pos2(227.0 * scale, 370.0 * scale);
+        let end = start - Vec2::new(0.0, 60.0 * scale);
+        if single_frame {
+            // A complete fast gesture can land between two UI redraws.
+            test.frame(
+                vec![
+                    Event::PointerMoved(start),
+                    Event::PointerButton {
+                        pos: start,
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Modifiers::NONE,
+                    },
+                    Event::PointerMoved(end),
+                    Event::PointerButton {
+                        pos: end,
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+                Modifiers::NONE,
+            );
+        } else {
+            test.pointer(start, true, Modifiers::NONE);
+            // The entire move arrives with mouse-up, as it can in a native host.
+            test.pointer(end, false, Modifiers::NONE);
+        }
+        assert!(
+            (test.host.params.depth.value() - 12.0).abs() < 0.001,
+            "depth={}, events={:?}",
+            test.host.params.depth.value(),
+            test.host.events.lock().unwrap()
+        );
+        let events = test.host.events.lock().unwrap();
+        assert_eq!(
+            events.iter().map(|e| e.0).collect::<Vec<_>>(),
+            ["begin", "set", "end"]
+        );
+        assert!(events.iter().all(|e| e.1 == "Depth"));
+    }
+}
+
+#[test]
+fn rotary_fine_drag_and_typed_values_use_the_existing_parameter_ranges() {
+    let mut test = Harness::new(theme::SIZE);
+    let start = pos2(671.0, 781.0);
+    let initial = test.host.params.attack_ms.unmodulated_normalized_value();
+    test.pointer(start, true, Modifiers::SHIFT);
+    test.pointer(start - Vec2::new(0.0, 60.0), false, Modifiers::SHIFT);
+    assert!(
+        (test.host.params.attack_ms.unmodulated_normalized_value() - initial - 0.03).abs() < 0.001,
+        "attack={}, initial={initial}, events={:?}",
+        test.host.params.attack_ms.unmodulated_normalized_value(),
+        test.host.events.lock().unwrap()
+    );
+    // Direct entry retains the host's plain milliseconds, despite the skewed knob range.
+    test.click(pos2(671.0, 877.0));
+    test.replace_text("37 ms");
+    test.key(egui::Key::Enter);
+    assert!((test.host.params.attack_ms.value() - 37.0).abs() < 0.001);
+}
+
+#[test]
+fn percentage_readouts_accept_display_units_and_escape_cancels_edits() {
+    let mut test = Harness::new(theme::SIZE);
+    for (x, param) in [
+        (148.0, test.host.params.detail.as_ptr()),
+        (1136.0, test.host.params.mix.as_ptr()),
+    ] {
+        test.click(pos2(x, 877.0));
+        test.replace_text("25 %");
+        test.key(egui::Key::Enter);
+        assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
+        test.click(pos2(x, 877.0));
+        test.replace_text("90 %");
+        test.key(egui::Key::Escape);
+        assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
+    }
+}
+
+#[test]
+fn graph_double_click_adds_an_existing_weighting_band() {
+    let mut test = Harness::new(theme::SIZE);
+    let point = pos2(700.0, 380.0);
+    test.click(point);
+    test.click(point);
+    assert!(test.editor.bands_panel);
+    let band = &test.host.params.bands[0];
+    assert!(band.enabled.value());
+    let expected_hz = 20.0 * 1000.0_f32.powf((700.0 - 470.0) / 972.0);
+    assert!((band.frequency.value() - expected_hz).abs() < 0.1);
+    assert!(band.depth_db.value() > 0.0);
+    assert_eq!(test.host.params.depth.value(), 6.0);
+}
+
+#[test]
+fn redesigned_editor_retains_band_editing_and_factory_preset_history() {
+    let mut test = Harness::new(theme::SIZE);
+    assert_eq!(test.editor.preset, "Gentle start");
+    let setter = test.gui.param_setter();
+    test.editor.select_preset(1, &setter);
+    assert_eq!(test.host.params.max_cut_db.value(), 8.0);
+    assert!(test.host.params.bands[0].enabled.value());
+    test.frame(vec![], Modifiers::NONE);
+    let setter = test.gui.param_setter();
+    test.editor.undo(&setter);
+    test.frame(vec![], Modifiers::NONE);
+    assert_eq!(test.host.params.max_cut_db.value(), 12.0);
+    assert!(!test.host.params.bands[0].enabled.value());
+    let setter = test.gui.param_setter();
+    test.editor.redo(&setter);
+    test.frame(vec![], Modifiers::NONE);
+    assert_eq!(test.host.params.max_cut_db.value(), 8.0);
+    // Existing controls remain drawable together at the minimum supported size.
+    test.editor.bands_panel = true;
+    test.editor.channel_curves = true;
+    test.editor.settings_panel = true;
+    test.editor.file_panel = true;
+    test.size = Vec2::new(960.0, 640.0);
+    test.frame(vec![], Modifiers::NONE);
+}

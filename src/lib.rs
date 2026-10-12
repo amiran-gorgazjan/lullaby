@@ -73,7 +73,7 @@ impl Default for Lullaby {
             params: Arc::new(LullabyParams::default()),
             engine: None,
             meters: Arc::new(Meters::default()),
-            editor_state: EguiEditorState::from_size(LogicalSize::new(1120.0, 840.0), 1.0),
+            editor_state: EguiEditorState::from_size(LogicalSize::new(1152.0, 768.0), 1.0),
             repaint: RepaintNotifier::new(),
             restart_requested: false,
         }
@@ -132,7 +132,7 @@ impl Plugin for Lullaby {
             self.editor_state.clone(),
             self.repaint.clone(),
             EguiNiceSettings::new().with_resize_hint(
-                ResizeHint::resizable().with_min_logical_size(LogicalSize::new(960.0, 700.0)),
+                ResizeHint::resizable().with_min_logical_size(LogicalSize::new(960.0, 640.0)),
             ),
             editor::LullabyEditor::new(self.params.clone(), self.meters.clone()),
         )

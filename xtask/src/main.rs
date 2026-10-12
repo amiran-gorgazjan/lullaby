@@ -19,5 +19,51 @@ fn main() -> nice_plug_xtask::Result<()> {
         }
         return Ok(());
     }
-    nice_plug_xtask::main()
+    nice_plug_xtask::main()?;
+    if args
+        .first()
+        .is_some_and(|arg| arg == "bundle" || arg == "bundle-universal")
+    {
+        bundle_font_licenses()?;
+    }
+    Ok(())
+}
+
+fn bundle_font_licenses() -> nice_plug_xtask::Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("target"));
+    let bundles = target.join("bundled");
+    let notices = concat!(
+        "Lullaby interface fonts\n\nCormorant Garamond\n",
+        include_str!("../../assets/fonts/CormorantGaramond-OFL.txt"),
+        "\n\nLato\n",
+        include_str!("../../assets/fonts/Lato-OFL.txt"),
+    );
+    // The companion notice covers single-file CLAPs on Windows and Linux.
+    std::fs::write(bundles.join("FONT-LICENSES.txt"), notices)?;
+    for name in ["Lullaby.vst3", "Lullaby.clap"] {
+        let bundle = bundles.join(name);
+        if !bundle.is_dir() {
+            continue;
+        }
+        let resources = bundle.join("Contents/Resources");
+        std::fs::create_dir_all(&resources)?;
+        std::fs::write(resources.join("FONT-LICENSES.txt"), notices)?;
+        // Resource changes invalidate the signature made by the upstream bundler.
+        #[cfg(target_os = "macos")]
+        if bundle.join("Contents/MacOS").is_dir() {
+            let status = std::process::Command::new("codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(&bundle)
+                .status()?;
+            if !status.success() {
+                return Err(
+                    std::io::Error::other("Could not sign bundle with font notices").into(),
+                );
+            }
+        }
+    }
+    Ok(())
 }

@@ -1,10 +1,10 @@
 # Validation record
 
-Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 10 October 2026.
+Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 12 October 2026.
 
 ## Passed locally
 
-- `cargo test --workspace --locked`: **30 tests** pass. Sixteen DSP behavior
+- `cargo test --workspace --locked --offline`: **35 tests** pass. Sixteen DSP behavior
   tests cover all quality/phase combinations at unity; latency-aligned dry,
   bypass, sidechain listen and delta; resonance attenuation and maximum cut;
   soft-mode level invariance; hard-mode level dependence; sidechain triggering;
@@ -27,6 +27,11 @@ Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 10 October 2026.
 - The additional real-time test observes the thread-local allocator across
   repeated FFT processing, automation, phase changes, band audition and reset:
   **zero allocations and deallocations** after engine construction.
+- Five editor regressions cover rotary gestures at reference and minimum sizes,
+  including an entire drag between redraws and motion coalesced with release;
+  balanced host automation gestures; fine adjustment and typed milliseconds;
+  percentage entry and Escape cancellation; graph band creation; factory preset
+  history; and rendering the existing panels at minimum size.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: clean.
 - `cargo fmt --all --check`: clean.
 - `cargo xtask bundle lullaby --release --locked`: Apple Silicon VST3 and CLAP
@@ -35,9 +40,19 @@ Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 10 October 2026.
   parameter IDs, host bypass flag, parameter events, partial-read/write state
   streams, state recall, variable blocks (1/31/128/257/512 samples), and normal /
   low-latency reconstruction passed. VST3 factory symbol is present.
-- Earlier Cocoa test-host editor validation: opened and rendered; verified factory preset
-  selection changes the controls and curve, and Undo/Redo restores each state.
-  Visual inspection caught and corrected slider overflow and unrounded values.
+- Redesigned editor inspected in the native Cocoa CLAP test host at 1152×768 and
+  960×640. Verified Depth dragging, typed Attack entry, Vocal Silk's 3.2 kHz band,
+  preset navigation, Undo/Redo and spectrum floor selection. The provided vocal
+  resonance recording drives the live detector display through real processing,
+  silently, without opening an audio device. Processing settings and all six
+  frequency tilts remain reachable by scrolling at minimum size. The shared
+  editor modules change presentation without modifying DSP or host parameters.
+  Enabled band nodes remain visible with the panel closed. Peak reduction is
+  retained numerically and separate channel reduction curves are available in
+  the graph context menu; both channel weighting curves remain available.
+- Both embedded fonts render in the native editor. Full OFL notices are packaged
+  in VST3/CLAP resources and AU third-party notices, with a companion license file
+  for single-file CLAP distributions. Resource changes are ad-hoc signed again.
 - `cargo xtask bundle-au lullaby --release --locked --offline`: Apple Silicon
   **AUv2** component built with its CLAP embedded, version 0.1.2, and ad-hoc
   signatures verified recursively. AU identity is `aufx / Lulb / Llby`.
