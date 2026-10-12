@@ -37,7 +37,7 @@ in `Cargo.toml`. The project uses Rust 1.95 for egui 0.36 compatibility.
 
 | Area | Implementation |
 | --- | --- |
-| Detector | Local spectral prominence against an amplitude-weighted reference, relative activity floor; additional absolute-level condition in hard mode |
+| Detector | Local peak-envelope reference excluding the candidate resonance region; harmonic-foundation allowance, relative activity floor; additional absolute-level condition in hard mode |
 | Suppression | Per-bin attack/release, bounded attenuation, continuously updated FFT filter |
 | Phase | Real spectral gains, or causal real-cepstrum minimum-phase reconstruction per frame |
 | Weighting | Eight editable bands: bell, two shelves, two cuts, parallel pass bands, rejection and tilt; per-band focus |
@@ -62,6 +62,10 @@ Version 0.1.1 recalibrates detection and soft-mode Depth after a user reported
 excessive broadband reduction. The cause, synthetic measurements and regression
 coverage are recorded in [DSP calibration](dsp-calibration.md). These measurements
 validate Lullaby against its own intended behavior, not against Soothe.
+Version 0.1.2 replaces the reference estimator to prevent strong peaks from
+masking themselves, adds user-supplied vocal fixtures and more complex synthetic
+regressions, and avoids startup detection before a full analysis window exists.
+See the [resonance review](resonance-review.md) for results and remaining limits.
 
 Low latency is **512 samples**, not zero. Other modes are **2048 samples**; phase
 choice does not change reported latency. FFT sizes stay fixed at all sample
@@ -70,10 +74,14 @@ soft, not a brick-wall guarantee. Max cut bounds the spectral filter gains, not
 instantaneous waveform peaks. Detector linking uses average powers to avoid
 phase cancellation. The displayed input trace is the linked detector spectrum.
 
-Surround/group routing, AU/AAX export, proprietary preset import, preset search
+Surround/group routing, AAX export, proprietary preset import, preset search
 and favorites, multi-node editing and automatic offline quality switching are
 not implemented. A/B slots, quality lock and undo history are editor-session
 state; the active sound settings are saved by the host. JSON presets contain
 sound settings only. Quality changes ask the host to restart processing and can
 briefly interrupt audio; a host that defers restarts keeps the previous latency
 until reactivation. macOS bundles are locally ad-hoc signed, not notarized.
+
+The macOS AUv2 build embeds the CLAP through the open-source CLAP wrapper, with
+the same Rust DSP and editor. Its currently exposed layout is stereo with a
+stereo sidechain. See [AU packaging and validation](audio-unit.md).

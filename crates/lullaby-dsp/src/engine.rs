@@ -1,3 +1,4 @@
+use crate::detector::PeakReference;
 use crate::{Mode, Phase, Quality, Settings, StereoMode, db_to_gain, gain_to_db};
 use rustfft::{Fft, FftPlanner, num_complex::Complex32};
 use std::{f32::consts::PI, sync::Arc};
@@ -29,9 +30,7 @@ struct Channel {
     spectrum: Vec<Complex32>,
     detector: Vec<Complex32>,
     filter: Vec<Complex32>,
-    amplitude_sum: Vec<f64>,
-    power_sum: Vec<f64>,
-    magnitude: Vec<f32>,
+    reference: PeakReference,
     magnitude_db: Vec<f32>,
     reduction: Vec<f32>,
     weight: Vec<f32>,
@@ -47,9 +46,7 @@ impl Channel {
             spectrum: vec![Complex32::default(); n],
             detector: vec![Complex32::default(); n],
             filter: vec![Complex32::default(); n],
-            amplitude_sum: vec![0.0; n / 2 + 2],
-            power_sum: vec![0.0; n / 2 + 2],
-            magnitude: vec![0.0; n / 2 + 1],
+            reference: PeakReference::new(n / 2 + 1),
             magnitude_db: vec![0.0; n / 2 + 1],
             reduction: vec![0.0; n / 2 + 1],
             weight: vec![0.0; n / 2 + 1],
@@ -80,6 +77,7 @@ pub struct Engine {
     hop: usize,
     pos: usize,
     until_frame: usize,
+    filled: usize,
     window: Vec<f32>,
     forward: Arc<dyn Fft<f32>>,
     inverse: Arc<dyn Fft<f32>>,
@@ -88,7 +86,9 @@ pub struct Engine {
     sidechain_delay: Vec<[f32; 2]>,
     attack: Vec<f32>,
     release: Vec<f32>,
-    radius: Vec<usize>,
+    reference_lower: Vec<usize>,
+    reference_upper: Vec<usize>,
+    reference_guard: Vec<usize>,
     threshold: Vec<f32>,
     audition_mask: Vec<f32>,
     cached: Option<Settings>,
@@ -127,6 +127,7 @@ impl Engine {
             hop,
             pos: 0,
             until_frame: hop,
+            filled: 0,
             window: (0..n)
                 .map(|i| (0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos()).sqrt())
                 .collect(),
@@ -137,7 +138,9 @@ impl Engine {
             sidechain_delay: vec![[0.0; 2]; n],
             attack: vec![0.0; n / 2 + 1],
             release: vec![0.0; n / 2 + 1],
-            radius: vec![0; n / 2 + 1],
+            reference_lower: vec![0; n / 2 + 1],
+            reference_upper: vec![0; n / 2 + 1],
+            reference_guard: vec![0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
             cached: None,
@@ -178,6 +181,7 @@ impl Engine {
         self.sidechain_delay.fill([0.0; 2]);
         self.pos = 0;
         self.until_frame = self.hop;
+        self.filled = 0;
         self.cached = None;
         self.meter = MeterFrame::default();
         self.frame_ready = false;
@@ -197,7 +201,10 @@ impl Engine {
             let high = 1.0 / (1.0 + (2000.0 / f).powi(2));
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
             let detail = (s.detail + 0.5 * tilt(s.detail_tilt)).clamp(0.0, 1.0);
-            self.radius[k] = ((k as f32 * (0.7 - 0.6 * detail)) as usize).max(4);
+            let extent = (1.25 - 0.5 * detail).exp2();
+            self.reference_lower[k] = (k as f32 / extent).floor() as usize;
+            self.reference_upper[k] = ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
+            self.reference_guard[k] = ((k as f32 * (0.3 - 0.25 * detail)).round() as usize).max(3);
             // Detail tilt must affect detection selectivity as well as bandwidth.
             // Higher depth gradually admits less prominent peaks, while the
             // default leaves ordinary windowed sinusoidal lobes alone.
@@ -268,6 +275,7 @@ impl Engine {
             };
         }
         self.pos = (self.pos + 1) % self.n;
+        self.filled = (self.filled + 1).min(self.n);
         self.until_frame -= 1;
         if self.until_frame == 0 {
             self.render_frame(&s);
@@ -336,32 +344,20 @@ impl Engine {
             for (c, p) in power.iter().enumerate() {
                 let linked = *p + s.link * (shared - *p);
                 let magnitude = linked.max(0.0).sqrt() * norm;
-                self.channels[c].magnitude[k] = magnitude;
                 self.channels[c].magnitude_db[k] = gain_to_db(magnitude).max(-150.0);
             }
         }
         self.meter.peak_reduction_db = 0.0;
         for ch in &mut self.channels {
-            ch.amplitude_sum[0] = 0.0;
-            ch.power_sum[0] = 0.0;
             let peak = ch.magnitude_db.iter().copied().fold(-150.0_f32, f32::max);
-            // The reference is an amplitude-weighted local amplitude mean,
-            // sum(amplitude^2) / sum(amplitude). Unlike a mean of decibels,
-            // empty gaps between musical harmonics cannot drag it down toward
-            // the noise floor and make every harmonic appear resonant.
-            // f64 prefix sums retain quiet treble after large bass bins.
             let floor = (peak - 60.0).max(-140.0);
-            for k in 0..bins {
-                let amplitude = f64::from(ch.magnitude[k]);
-                ch.amplitude_sum[k + 1] = ch.amplitude_sum[k] + amplitude;
-                ch.power_sum[k + 1] = ch.power_sum[k] + amplitude * amplitude;
-            }
-            for k in 0..bins {
-                let lo = k.saturating_sub(self.radius[k]).max(1).min(bins - 1);
-                let hi = (k + self.radius[k] + 1).min(bins).max(lo + 1);
-                let amplitude = (ch.amplitude_sum[hi] - ch.amplitude_sum[lo]).max(1e-20);
-                let power = (ch.power_sum[hi] - ch.power_sum[lo]).max(0.0);
-                let baseline = gain_to_db((power / amplitude) as f32);
+            let reference = ch.reference.analyze(
+                &ch.magnitude_db,
+                &self.reference_lower,
+                &self.reference_upper,
+                &self.reference_guard,
+            );
+            for (k, &baseline) in reference.iter().enumerate() {
                 let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0);
                 let activity = ((ch.magnitude_db[k] - floor - 3.0) / 12.0).clamp(0.0, 1.0);
                 let requested = match s.mode {
@@ -372,7 +368,9 @@ impl Engine {
                             * 0.2
                     }
                 };
-                let target = if k == 0 || peak < -115.0 {
+                // Partially filled startup windows invent broad spectral
+                // leakage. Wait for real context before deciding what rings.
+                let target = if self.filled < self.n || k == 0 || peak < -115.0 {
                     0.0
                 } else {
                     (requested * activity * ch.weight[k]).min(s.max_cut_db)

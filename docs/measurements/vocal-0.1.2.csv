@@ -1,0 +1,17 @@
+fixture,depth,phase,target_db,bass_db,treble_db,rms_db
+original,6,Minimum,-1.844,-0.809,-0.116,-1.410
+original,12,Minimum,-5.742,-1.739,-0.334,-4.032
+original,18,Minimum,-9.761,-2.405,-0.634,-6.279
+original,24,Minimum,-10.904,-2.793,-0.913,-6.928
+original,6,Linear,-1.813,-0.803,-0.115,-1.387
+original,12,Linear,-5.487,-1.718,-0.330,-3.879
+original,18,Linear,-9.142,-2.371,-0.625,-6.009
+original,24,Linear,-10.154,-2.754,-0.899,-6.628
+resonance,6,Minimum,-5.740,-0.736,-1.777,-5.209
+resonance,12,Minimum,-11.413,-1.615,-4.685,-10.019
+resonance,18,Minimum,-11.949,-2.274,-6.087,-10.829
+resonance,24,Minimum,-12.023,-2.653,-6.560,-11.011
+resonance,6,Linear,-5.543,-0.731,-1.759,-5.042
+resonance,12,Linear,-10.863,-1.596,-4.601,-9.602
+resonance,18,Linear,-11.567,-2.241,-5.971,-10.502
+resonance,24,Linear,-11.746,-2.615,-6.431,-10.755

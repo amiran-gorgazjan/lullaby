@@ -51,7 +51,7 @@ fn vocal_silk_adds_local_reduction_without_changing_remote_harmonics() {
             g.tones_db
         );
         assert!(
-            v.tones_db[3] < g.tones_db[3] - 0.75,
+            v.tones_db[3] < g.tones_db[3] * 1.8,
             "bell has no useful effect: gentle {:?}, vocal {:?}, {phase:?}",
             g.tones_db,
             v.tones_db

@@ -29,6 +29,12 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo xtask bundle lullaby --release --locked
       - run: python scripts/clap_smoke.py
+      - name: Build and test AUv2
+        if: runner.os == 'macOS'
+        run: cargo xtask bundle-au lullaby --release --locked
+      - name: Validate AUv2 with Apple's auval
+        if: runner.os == 'macOS'
+        run: python3 scripts/auval.py
       - uses: actions/upload-artifact@v4
         with:
           name: Lullaby-${{ runner.os }}-${{ runner.arch }}

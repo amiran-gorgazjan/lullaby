@@ -1,4 +1,5 @@
 //! Host-independent, allocation-free (after construction) spectral resonance suppression.
+mod detector;
 mod engine;
 mod settings;
 

@@ -2,7 +2,7 @@
 
 A Rust resonance suppressor with an original DSP engine and interface, informed
 by Soothe3's public feature descriptions. Builds **VST3 and CLAP** for **Windows,
-macOS and Linux**. This is an initial implementation with substantial functional
+macOS and Linux**, plus **AUv2** for **macOS**. This is an initial implementation with substantial functional
 overlap, not a sonically verified clone. See [research and differences](docs/research.md).
 
 ## Build
@@ -28,13 +28,26 @@ to a plugin directory scanned by your DAW:
 
 Builds target the current machine's architecture. For a universal macOS bundle,
 install both `aarch64-apple-darwin` and `x86_64-apple-darwin` with rustup, then run
-`cargo xtask bundle-universal lullaby --release --locked` on macOS. Logic requires
-AU, which is not provided; use a VST3/CLAP-compatible host.
+`cargo xtask bundle-universal lullaby --release --locked` on macOS.
+
+For **Audio Unit / Logic** builds, also install CMake 3.27+ and Python 3.9+, then run:
+
+```sh
+cargo xtask bundle-au lullaby --release --locked
+```
+
+This also builds VST3/CLAP and produces a self-contained
+`target/bundled/Lullaby.component`. Copy the whole component to
+`~/Library/Audio/Plug-Ins/Components/` and restart the host. Add `--universal` for
+Intel + Apple Silicon (both Rust targets required), or `--offline` after the
+dependencies have been cached. The AU currently exposes stereo main I/O with a
+stereo sidechain. See [AU building and validation](docs/audio-unit.md).
 
 ## Use
 
-Version **0.1.1** corrects excessive suppression in the original default and
-recalibrates soft-mode Depth. See the [measurements and explanation](docs/dsp-calibration.md).
+Version **0.1.2** corrects strong resonances escaping detection, following the
+0.1.1 fix for excessive default suppression. See the
+[vocal-fixture measurements and explanation](docs/resonance-review.md).
 Existing presets and sessions load, but their processing will sound different.
 After replacing the installed bundle, restart your DAW and check the version
 in the editor to ensure it has loaded the update.
@@ -89,6 +102,14 @@ monitoring, sanitization, presets and zero allocations during processing.
 Calibration tests check gentle defaults on ordinary harmonics and noise, local
 preset emphasis and progressive Depth response. A VST3 factory integration test
 checks host parameter conversion and audio output against the standalone engine.
+The supplied singing recordings live in `crates/lullaby-dsp/tests/fixtures/`.
+Further tests cover increasing resonance strength, moving stereo chords,
+simultaneous peaks, intermittent ringing, recovery, and sparse musical signals.
+To reproduce the vocal report and export two listening renders, run:
+
+```sh
+cargo run -p lullaby-dsp --example vocal_calibration --release --locked -- target/review
+```
 
 The GitHub Actions workflow builds, tests and uploads bundles on all three OSes.
 It must run in your repository before claiming Windows/Linux validation. Local
@@ -101,6 +122,8 @@ validation and host-testing limits are recorded in [validation](docs/validation.
 - `src/params.rs`: stable host parameter IDs and preset mapping.
 - `src/editor.rs`: native egui editor and preset workflow.
 - `scripts/clap_smoke.py`: native binary host smoke test.
+- `packaging/au`, `scripts/build_au.py`: pinned AUv2 wrapper and macOS build path.
+- `scripts/macos_au_smoke.mm`: native AU loading, state and audio regression tests.
 - `xtask`: cross-platform bundle creation.
 
 Project code is MIT licensed; dependencies retain their licenses. Lullaby is

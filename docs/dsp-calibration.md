@@ -1,5 +1,9 @@
 # Default suppression correction — 0.1.1
 
+This is a historical record of the first correction. The reference estimator
+described here was superseded by the [0.1.2 resonance review](resonance-review.md)
+after real vocal fixtures exposed its weakness on stronger peaks.
+
 The reported muffled default was reproducible in the DSP. Two errors combined:
 
 1. The detector averaged **decibels** across a spectral neighborhood. Deep gaps
