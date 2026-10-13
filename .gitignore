@@ -1,0 +1,7 @@
+/target/
+/.cache/
+*.wav
+.DS_Store
+__pycache__/
+*.pyc
+/ui_reference.png

@@ -1,0 +1,105 @@
+--- a/src/wrapasauv2.cpp
++++ b/src/wrapasauv2.cpp
+@@ -585,6 +585,36 @@
+         _processAdapter->addParameterEvent(param, inValue, inBufferOffsetInFrames);
+       }
+     }
++    else if (_plugin && _plugin->_ext._params)
++    {
++      // Before activation there is no process adapter. Apply host settings now,
++      // especially Quality, which determines latency during CLAP activation.
++      const auto found = _parametertree.find(inID);
++      if (found != _parametertree.end())
++      {
++        auto mainThread = _plugin->AlwaysMainThread();
++        clap_event_param_value_t event{};
++        event.header = {sizeof(event), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0};
++        event.param_id = inID;
++        event.cookie = found->second->info().cookie;
++        event.note_id = -1;
++        event.port_index = event.channel = event.key = -1;
++        event.value = inValue;
++        clap_input_events_t input{&event,
++          [](const clap_input_events_t *) -> uint32_t { return 1; },
++          [](const clap_input_events_t *list, uint32_t index) -> const clap_event_header_t * {
++            return index == 0 ? &static_cast<clap_event_param_value_t *>(list->ctx)->header : nullptr;
++          }};
++        clap_output_events_t output{this,
++          [](const clap_output_events_t *list, const clap_event_header_t *value) -> bool {
++            if (value->space_id == CLAP_CORE_EVENT_SPACE_ID && value->type == CLAP_EVENT_PARAM_VALUE)
++              static_cast<WrapAsAUV2 *>(list->ctx)->onPerformEdit(
++                  reinterpret_cast<const clap_event_param_value_t *>(value));
++            return true;
++          }};
++        _plugin->_ext._params->flush(_plugin->_plugin, &input, &output);
++      }
++    }
+   }
+   return AUBase::SetParameter(inID, inScope, inElement, inValue, inBufferOffsetInFrames);
+ }
+@@ -1370,7 +1400,8 @@
+ {
+   if (!ptPList) return kAudioUnitErr_InvalidParameter;
+ 
+-  if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
++  // AU state is available before AudioUnitInitialize (the CLAP is already initialized).
++  if (!_plugin || !_plugin->_plugin) return kAudioUnitErr_Uninitialized;
+ 
+   auto guarantee_mainthread = _plugin->AlwaysMainThread();
+ 
+@@ -1381,7 +1412,8 @@
+   else
+   {
+     Clap::StateMemento chunk;
+-    _plugin->_ext._state->save(_plugin->_plugin, chunk);
++    if (!_plugin->_ext._state->save(_plugin->_plugin, chunk))
++      return kAudioUnitErr_InvalidPropertyValue;
+ 
+ #if DICTIONARY_STREAM_FORMAT_JUCE
+     auto err = ausdk::AUBase::SaveState(ptPList);
+@@ -1438,8 +1470,12 @@
+ {
+   if (!plist) return kAudioUnitErr_InvalidParameter;
+ 
+-  if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
+-
++  // AU state is available before AudioUnitInitialize (the CLAP is already initialized).
++  if (!_plugin || !_plugin->_plugin) return kAudioUnitErr_Uninitialized;
++
++  if (CFGetTypeID(plist) != CFDictionaryGetTypeID() || !_plugin->_ext._state)
++    return kAudioUnitErr_InvalidPropertyValue;
++  auto mainThread = _plugin->AlwaysMainThread();
+   CFDictionaryRef tDict = CFDictionaryRef(plist);
+ 
+   // Find 'data' key
+@@ -1474,7 +1510,9 @@
+       UInt8 *streamData = (UInt8 *)(CFDataGetBytePtr(juceData));
+ 
+       chunk.setData(streamData, numBytes);
+-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
++      if (!_plugin->_ext._state->load(_plugin->_plugin, chunk))
++        return kAudioUnitErr_InvalidPropertyValue;
++      setupParameters(_plugin->_plugin, _plugin->_ext._params);
+     }
+     return noErr;
+   }
+@@ -1483,6 +1521,8 @@
+   const void *pName = CFDictionaryGetValue(tDict, CFSTR(kAUPresetNameKey));
+   if (pName)
+   {
++    if (CFGetTypeID(pName) != CFStringGetTypeID()) return kAudioUnitErr_InvalidPropertyValue;
++    if (_current_program_name) CFRelease(_current_program_name);
+     _current_program_name = CFStringCreateCopy(NULL, (CFStringRef)pName);
+   }
+ 
+@@ -1497,7 +1537,9 @@
+     {
+       Clap::StateMemento chunk;
+       chunk.setData(pData, lLen);
+-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
++      if (!_plugin->_ext._state->load(_plugin->_plugin, chunk))
++        return kAudioUnitErr_InvalidPropertyValue;
++      setupParameters(_plugin->_plugin, _plugin->_ext._params);
+     }
+   }
+   return noErr;

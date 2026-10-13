@@ -1,0 +1,21 @@
+[package]
+name = "lullaby-dsp"
+version = "0.1.2"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/amiran-gorgazjan/lullaby"
+
+[features]
+# Private vocal recordings are deliberately excluded from the public repository.
+vocal-fixtures = []
+
+[[example]]
+name = "vocal_calibration"
+required-features = ["vocal-fixtures"]
+
+[dependencies]
+rustfft = "6.4"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"
