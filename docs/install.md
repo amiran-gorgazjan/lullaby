@@ -23,7 +23,7 @@ must run with matching architectures; the macOS archive contains both Intel
 and Apple Silicon binaries.
 
 Start with **Gentle start**, and adjust Depth while listening. See the
-[usage guide](https://github.com/amiran-gorgazjan/lullaby#use) for controls and
+[usage guide](usage.md) for controls and
 latency. Version 0.1.2 is an early release; please report host-specific issues
 with your OS, DAW version and plugin format on
 [GitHub Issues](https://github.com/amiran-gorgazjan/lullaby/issues).
