@@ -84,6 +84,10 @@ impl Harness {
         let setter = self.gui.param_setter();
         let mut output = self.ctx.run_ui(input, |ui| self.editor.draw(ui, &setter));
         assert!(!output.shapes.is_empty());
+        let meshes = self
+            .ctx
+            .tessellate(std::mem::take(&mut output.shapes), output.pixels_per_point);
+        assert!(!meshes.is_empty());
         // Headless tests don't upload textures to a GPU.
         output.textures_delta.clear();
     }
@@ -130,6 +134,93 @@ impl Harness {
         );
         self.frame(vec![Event::Text(text.into())], Modifiers::NONE);
     }
+}
+
+#[test]
+fn sustained_editor_rendering_has_bounded_live_memory() {
+    let mut test = Harness::new(Vec2::new(1152.0, 768.0));
+    for _ in 0..120 {
+        test.frame(vec![], Modifiers::NONE);
+    }
+    let baseline = crate::allocation_tests::live_bytes(false);
+    for _ in 0..1200 {
+        test.frame(vec![], Modifiers::NONE);
+    }
+    let growth = crate::allocation_tests::live_bytes(false) - baseline;
+    eprintln!("UI live heap growth after 1200 frames: {growth} bytes");
+    assert!(
+        growth < 256 * 1024,
+        "UI retained {growth} bytes after warmup"
+    );
+
+    // Exercise changing text/meters, bounded undo history and all panels, too.
+    test.editor.file_panel = true;
+    test.editor.settings_panel = true;
+    test.editor.bands_panel = true;
+    test.editor.channel_curves = true;
+    let render = |test: &mut Harness, frame: usize| {
+        let phase = frame as f32 * 0.037;
+        test.editor.meters.publish(&lullaby_dsp::MeterFrame {
+            input_db: std::array::from_fn(|i| -40.0 + 18.0 * (phase + i as f32 * 0.1).sin()),
+            reduction_db: std::array::from_fn(|c| {
+                std::array::from_fn(|i| 3.0 + 2.0 * (phase + (i + c) as f32 * 0.2).sin())
+            }),
+            peak_reduction_db: 3.0 + 2.0 * phase.sin(),
+        });
+        test.size = if frame % 120 < 60 {
+            Vec2::new(960.0, 640.0)
+        } else {
+            Vec2::new(1152.0, 768.0)
+        };
+        let setter = test.gui.param_setter();
+        set(&setter, &test.host.params.depth, 12.0 + 6.0 * phase.sin());
+        test.frame(vec![], Modifiers::NONE);
+        // The mock host's event log is instrumentation, not plugin state.
+        test.host.events.lock().unwrap().clear();
+        assert!(test.editor.undo.len() <= 64);
+        assert_eq!(test.ctx.tex_manager().read().num_allocated(), 2);
+    };
+    for frame in 0..240 {
+        render(&mut test, frame);
+    }
+    let baseline = crate::allocation_tests::live_bytes(false);
+    for frame in 240..1440 {
+        render(&mut test, frame);
+    }
+    let growth = crate::allocation_tests::live_bytes(false) - baseline;
+    eprintln!("Active UI live heap growth after 1200 frames: {growth} bytes");
+    assert!(
+        growth < 256 * 1024,
+        "Active UI retained {growth} bytes after warmup"
+    );
+}
+
+#[test]
+fn repeated_editor_creation_releases_owned_memory() {
+    let render_and_drop = || {
+        let mut test = Harness::new(Vec2::new(1152.0, 768.0));
+        let host = Arc::downgrade(&test.host);
+        let params = Arc::downgrade(&test.host.params);
+        let meters = Arc::downgrade(&test.editor.meters);
+        test.frame(vec![], Modifiers::NONE);
+        drop(test);
+        assert!(host.upgrade().is_none());
+        assert!(params.upgrade().is_none());
+        assert!(meters.upgrade().is_none());
+    };
+    for _ in 0..4 {
+        render_and_drop();
+    }
+    let baseline = crate::allocation_tests::live_bytes(false);
+    for _ in 0..48 {
+        render_and_drop();
+    }
+    let growth = crate::allocation_tests::live_bytes(false) - baseline;
+    eprintln!("Editor live heap growth after 48 creations: {growth} bytes");
+    assert!(
+        growth < 64 * 1024,
+        "Editor teardown retained {growth} bytes"
+    );
 }
 
 #[test]

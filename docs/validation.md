@@ -4,7 +4,7 @@ Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 12 October 2026.
 
 ## Passed locally
 
-- `cargo test --workspace --locked --offline`: **35 tests** pass. Sixteen DSP behavior
+- `cargo test --workspace --locked --offline`: **38 tests** pass. Sixteen DSP behavior
   tests cover all quality/phase combinations at unity; latency-aligned dry,
   bypass, sidechain listen and delta; resonance attenuation and maximum cut;
   soft-mode level invariance; hard-mode level dependence; sidechain triggering;
@@ -32,6 +32,26 @@ Local environment: Apple Silicon macOS, Rust 1.95.0. Checked 12 October 2026.
   balanced host automation gestures; fine adjustment and typed milliseconds;
   percentage entry and Escape cancellation; graph band creation; factory preset
   history; and rendering the existing panels at minimum size.
+- Three memory regressions run in the normal test suite. Test-only allocator
+  accounting measures live Rust heap bytes (including reallocations and frees),
+  rather than RSS or cumulative allocation traffic:
+  - After warmup, 1,200 idle editor frames, including tessellation, retain **0
+    bytes**. Another 1,200 frames with changing meters, parameter automation,
+    resizing, all panels and channel curves retain **10,496 bytes**, below the
+    256 KiB budget. The texture count remains exactly two and undo history stays
+    at or below 64 entries.
+  - Creating, rendering and dropping 48 headless editors retains **0 bytes**
+    after warmup. Weak references verify that each editor's mock host, parameters
+    and meters are released. The regression budget is 64 KiB.
+  - Creating, activating, processing and destroying 48 VST3 instances across all
+    four quality modes, three sample rates and varying block sizes retains **0
+    bytes** after warmup. The 256 KiB budget counts all Rust worker threads;
+    wrapper tests serialize to avoid unrelated concurrent allocations.
+  These checks did not reproduce a leak. They cover Rust-owned memory, not
+  native window or GPU resources, and do not establish the cause of the reported
+  FL Studio memory spike. The user could no longer reproduce that spike. A short
+  native CLAP preview check also showed steady resident memory; it is not an
+  automated GPU-memory regression. No production behavior was changed.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: clean.
 - `cargo fmt --all --check`: clean.
 - `cargo xtask bundle lullaby --release --locked`: Apple Silicon VST3 and CLAP

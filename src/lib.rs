@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod allocation_tests;
 mod editor;
 mod params;
 
