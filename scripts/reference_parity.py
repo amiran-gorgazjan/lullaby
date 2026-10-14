@@ -364,7 +364,7 @@ def junit_report(result, output):
 
 
 def source_provenance(output, plugin, executable):
-    paths = [Path(__file__).resolve(), CONTRACT, ROOT / "tools/reference-host/src/main.rs",
+    paths = [Path(__file__).resolve(), ROOT / "scripts/reference_parity_score.py", CONTRACT, ROOT / "tools/reference-host/src/main.rs",
              ROOT / "tools/reference-host/Cargo.lock", *sorted((ROOT / "scripts/reference").glob("parity*.py")),
              ROOT / "scripts/reference_capture.py", ROOT / "scripts/reference/validate.py",
              ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "crates/lullaby-dsp/Cargo.toml",
@@ -445,7 +445,9 @@ def main():
                    tests=result.testsRun, failures=len(result.failures), errors=len(result.errors), skipped=len(result.skipped),
                    passed=result.wasSuccessful(), contract_sha256=sha(CONTRACT), limits=contract["primary_limits"],
                    results=result.records, cases_summary=[dict(id=r["id"], status=r["status"], failure=r["failure"],
-                       primary=r.get("delta_comparison", {}).get("primary"), unsupported=r.get("mapping", {}).get("unsupported", [])) for r in reports])
+                       primary=r.get("delta_comparison", {}).get("primary"),
+                       channels=r.get("delta_comparison", {}).get("channels"),
+                       unsupported=r.get("mapping", {}).get("unsupported", [])) for r in reports])
     write_json(output / "summary.json", summary)
     print(f"\n{len(entries)} cases, {len(primary_tests)} primary Delta tests: {summary['primary_passed']} passed. "
           f"{result.testsRun} total tests, {len(result.failures)} failures, {len(result.errors)} errors, {len(result.skipped)} skipped.")

@@ -11,8 +11,8 @@ Identical outputs produce exactly zero samples. The runner saves this signal as
 `delta-error.wav`, at its original level. It renders the actual Lullaby VST3 in
 Delta mode; mathematical dry-minus-wet is never substituted for native Delta.
 
-This is a deliberately red acceptance suite for the next implementation phase.
-Adding it does not change Lullaby's DSP. Native rendering currently uses the
+This is a deliberately strict acceptance suite. Separate progress scores below
+measure improvement while these acceptance tests are still red. Native rendering uses the
 macOS offline host; the metric, adapter and harness regression tests run on
 Windows, macOS and Linux in CI without either installed plugin or local WAVs.
 
@@ -84,6 +84,44 @@ estimates in reports are explanatory measurements and never alter acceptance.
 Do not loosen these thresholds or tune mappings separately per case to make the
 current implementation pass. A future tolerance change is a reviewable change
 to the acceptance contract, rather than an automatic result of a failed test.
+
+## Measure incremental progress
+
+After a complete baseline run, freeze every successfully rendered baseline case
+into a reusable cohort. Keep this same baseline and cohort throughout an
+improvement round:
+
+```sh
+target/reference-venv/bin/python scripts/reference_parity_score.py freeze \
+  target/reference-parity/round1-00-baseline \
+  --output target/reference-parity/round1-cohort.json
+
+target/reference-venv/bin/python scripts/reference_parity_score.py compare \
+  target/reference-parity/round1-00-baseline \
+  target/reference-parity/round1-01-routing \
+  --cohort target/reference-parity/round1-cohort.json \
+  --output target/reference-parity/round1-01-comparison.json
+```
+
+The progress score is the equal-case mean of
+`(Delta error RMS / reference Delta RMS)^2`, computed from the original-gain
+native Delta null. Lower is better; zero means an exact null. Its dB value is
+`10*log10(score)`. Absolute residual RMS is the square root of the equal-case
+mean squared residual RMS. Scores also retain each case's change, the worst
+channel by normalized error and by absolute RMS, strict primary pass counts,
+and full render coverage. A fixed `1e-12` reference RMS floor handles silent
+references without nonfinite values; it does not change acceptance thresholds.
+
+Both runs must contain every required case and match the acceptance contract.
+The cohort includes **all** baseline successes, with failed baseline cases
+recorded explicitly. If a candidate loses any cohort case, its aggregate score
+is invalid and the comparison exits 1. Newly supported cases are reported
+separately until a deliberately reviewed new round establishes another cohort;
+they cannot dilute the existing score. The initial unsupported surround case
+therefore remains visible as a failing acceptance test alongside the 24-case
+progress score. Changed baseline measurements, partial runs, inconsistent
+channel measurements and nonfinite values are rejected. No gain/lag fitting is
+used and no strict test is relaxed by an improved progress score.
 
 ## Support tests and diagnostics
 

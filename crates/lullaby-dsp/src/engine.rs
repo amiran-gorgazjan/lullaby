@@ -293,7 +293,8 @@ impl Engine {
         self.band_listen += a * (f32::from(s.listen_band >= 0) - self.band_listen);
         std::array::from_fn(|c| {
             let mixed = dry[c] + self.mix * (wet[c] * self.trim - dry[c]);
-            let monitored = mixed + self.delta * ((dry[c] - wet[c]) - mixed);
+            let removed = self.mix * self.trim * (dry[c] - wet[c]);
+            let monitored = mixed + self.delta * (removed - mixed);
             let monitored = monitored + self.band_listen * (audition[c] - monitored);
             let monitored = monitored + self.listen * (delayed_key[c] - monitored);
             let processed = monitored * self.gain;

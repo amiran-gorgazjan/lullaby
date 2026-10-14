@@ -102,6 +102,49 @@ fn delta_plus_wet_reconstructs_dry() {
 }
 
 #[test]
+fn native_delta_scales_with_mix_wet_trim_and_output_gain() {
+    let s = Settings {
+        depth: 18.0,
+        phase: Phase::Linear,
+        delta: true,
+        ..Settings::default()
+    };
+    let (basis, e) = render(s, 16000, signal, |_| [0.0; 2]);
+    assert!(
+        rms(&basis[8000..], 0) > 0.01,
+        "test must remove audible energy"
+    );
+    for (mix, wet_trim_db, output_db) in [
+        (0.0, 6.0, -6.0),
+        (0.5, 0.0, 0.0),
+        (1.0, 6.0, 0.0),
+        (1.0, 0.0, -6.0),
+        (0.5, 6.0, -6.0),
+    ] {
+        let (delta, _) = render(
+            Settings {
+                mix,
+                wet_trim_db,
+                output_db,
+                ..s
+            },
+            16000,
+            signal,
+            |_| [0.0; 2],
+        );
+        let factor = mix * db_to_gain(wet_trim_db) * db_to_gain(output_db);
+        for i in e.latency_samples()..delta.len() {
+            for c in 0..2 {
+                assert!(
+                    (delta[i][c] - factor * basis[i][c]).abs() < 3e-6,
+                    "mix={mix}, wet={wet_trim_db}, output={output_db}, sample={i}, channel={c}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn resonances_are_reduced_and_max_cut_is_respected() {
     let s = Settings {
         max_cut_db: 6.0,
