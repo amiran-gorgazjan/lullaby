@@ -14,7 +14,7 @@ fn main() {
         let input = read_fixture(&format!("janice_singing_{name}.wav"));
         let input_bands = band_energy(&input, &VOCAL_BANDS);
         for phase in [Phase::Minimum, Phase::Linear] {
-            for depth in [6.0, 12.0, 18.0, 24.0] {
+            for depth in [3.0, 6.0, 8.0, 10.0] {
                 let result = render(
                     &input,
                     Settings {
@@ -39,7 +39,7 @@ fn main() {
                 if let Some(dir) = &output_dir
                     && name == "resonance"
                     && phase == Phase::Minimum
-                    && depth <= 12.0
+                    && depth <= 10.0
                 {
                     write_render(
                         &result,

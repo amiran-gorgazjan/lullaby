@@ -20,6 +20,7 @@ fn singing_eq_peak_receives_selective_reduction() {
     for quality in [Quality::Normal, Quality::LowLatency] {
         for phase in [Phase::Minimum, Phase::Linear] {
             let settings = Settings {
+                depth: 6.0,
                 phase,
                 quality,
                 ..Settings::default()
@@ -65,7 +66,7 @@ fn singing_eq_peak_receives_selective_reduction() {
             let stronger = render(
                 &resonant,
                 Settings {
-                    depth: 12.0,
+                    depth: 10.0,
                     ..settings
                 },
             );
@@ -101,7 +102,7 @@ fn boosting_a_quiet_gap_does_not_force_suppression_of_nearby_notes() {
     let clean = musical_mix(2);
     let input = peaking_eq(&clean, 750.0, 18.0, 8.0);
     let settings = Settings {
-        depth: 12.0,
+        depth: 10.0,
         ..Settings::default()
     };
     let output = render(&input, settings);
@@ -137,7 +138,7 @@ fn eq_resonances_on_an_evolving_stereo_chord_are_reduced() {
             "ordinary chord must stay gentle"
         );
         let settings = Settings {
-            depth: 12.0,
+            depth: 10.0,
             phase,
             ..Settings::default()
         };
@@ -191,7 +192,7 @@ fn two_separated_resonances_can_be_reduced_together() {
     let output = render(
         &input,
         Settings {
-            depth: 12.0,
+            depth: 10.0,
             ..Settings::default()
         },
     );
@@ -218,7 +219,7 @@ fn suppression_recovers_after_an_intermittent_resonance() {
         }
     }
     let settings = Settings {
-        depth: 12.0,
+        depth: 10.0,
         ..Settings::default()
     };
     let output = render(&input, settings);
@@ -288,7 +289,13 @@ fn pure_notes_and_a_boosted_fundamental_are_not_exempt() {
             .collect(),
     };
     let input = peaking_eq(&clean, 200.0, 18.0, 12.0);
-    let output = render(&input, Settings::default());
+    let output = render(
+        &input,
+        Settings {
+            depth: 6.0,
+            ..Settings::default()
+        },
+    );
     let band = [(175.0, 225.0)];
     let cut = ratio_db(
         band_energy(&output, &band)[0],
@@ -309,7 +316,13 @@ fn pure_notes_and_a_boosted_fundamental_are_not_exempt() {
             })
             .collect(),
     };
-    let output = render(&input, Settings::default());
+    let output = render(
+        &input,
+        Settings {
+            depth: 6.0,
+            ..Settings::default()
+        },
+    );
     let band = [(950.0, 1050.0)];
     assert!(
         ratio_db(
@@ -352,6 +365,7 @@ fn increasing_peak_strength_does_not_hide_it_from_the_detector() {
             let output = render(
                 &input,
                 Settings {
+                    depth: 6.0,
                     phase,
                     ..Settings::default()
                 },
@@ -371,4 +385,51 @@ fn increasing_peak_strength_does_not_hide_it_from_the_detector() {
             previous = cut;
         }
     }
+}
+
+#[test]
+fn detail_controls_cut_concentration_on_close_tones() {
+    let sample_rate = 48000;
+    let input = Audio {
+        sample_rate,
+        samples: (0..sample_rate * 2)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                [(std::f32::consts::TAU * 1056.0 * t).sin() * 0.2
+                    + (std::f32::consts::TAU * 1000.0 * t).sin() * 0.03
+                    + (std::f32::consts::TAU * 1112.0 * t).sin() * 0.03; 2]
+            })
+            .collect(),
+    };
+    let bands = [(990.0, 1010.0), (1046.0, 1066.0), (1102.0, 1122.0)];
+    let before = band_energy(&input, &bands);
+    let cuts = |detail| {
+        let output = render(
+            &input,
+            Settings {
+                depth: 10.0,
+                detail,
+                max_cut_db: 36.0,
+                phase: Phase::Linear,
+                ..Settings::default()
+            },
+        );
+        let after = band_energy(&output, &bands);
+        std::array::from_fn::<_, 3, _>(|i| -ratio_db(after[i], before[i]))
+    };
+    let broad = cuts(1.0);
+    let narrow = cuts(10.0);
+    assert!(broad[1] > 2.0, "broad cuts remain active: {broad:?}");
+    assert!(
+        (broad[1] - broad[0]).abs() < 2.0 && (broad[1] - broad[2]).abs() < 2.0,
+        "low Detail should cover neighboring tones: {broad:?}"
+    );
+    assert!(
+        narrow[1] > broad[1] + 6.0,
+        "high Detail concentrates stronger cuts: {broad:?} -> {narrow:?}"
+    );
+    assert!(
+        narrow[1] > narrow[0] + 3.0 && narrow[1] > narrow[2] + 3.0,
+        "high Detail should distinguish neighboring tones: {narrow:?}"
+    );
 }

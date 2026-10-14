@@ -113,7 +113,10 @@ impl Band {
 #[serde(default)]
 pub struct Settings {
     pub mode: Mode,
+    /// Unitless 0..10 suppression strength; not a dB amount.
     pub depth: f32,
+    /// Unitless 0..10 cut concentration: higher values select narrower, stronger cuts.
+    /// This independently calibrated law is not a filter Q or bandwidth in Hz.
     pub detail: f32,
     pub attack_ms: f32,
     pub release_ms: f32,
@@ -142,8 +145,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Soft,
-            depth: 6.0,
-            detail: 0.5,
+            depth: 3.0,
+            detail: 5.0,
             attack_ms: 10.0,
             release_ms: 120.0,
             max_cut_db: 12.0,
@@ -178,8 +181,8 @@ impl Settings {
                 fallback
             }
         }
-        self.depth = clamp(self.depth, 0.0, 24.0, 6.0);
-        self.detail = clamp(self.detail, 0.0, 1.0, 0.5);
+        self.depth = clamp(self.depth, 0.0, 10.0, 3.0);
+        self.detail = clamp(self.detail, 0.0, 10.0, 5.0);
         self.attack_ms = clamp(self.attack_ms, 0.1, 500.0, 10.0);
         self.release_ms = clamp(self.release_ms, 5.0, 2000.0, 120.0);
         self.max_cut_db = clamp(self.max_cut_db, 0.0, 36.0, 12.0);

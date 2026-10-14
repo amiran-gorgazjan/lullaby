@@ -151,13 +151,13 @@ def plan_case(record, lullaby_parameter_info):
             issue(name, value, "uncalibrated_scale", reason, selector, candidate, frame)
 
         if name == "Depth":
-            # Intentionally physical text; source raw=.3 must not become Lullaby raw=.3 (7.2).
+            # Displayed scalars are explicit; shared ranges do not prove equivalent DSP.
             uncalibrated("Depth", _bounded(value, 0, 10),
-                         "Soothe3 Depth 0..10 and Lullaby Depth 0..24 have no measured equivalence; "
+                         "Both Depth controls use 0..10; their nonlinear reduction laws remain approximate; "
                          "candidate uses the same displayed number, not normalized position.")
         elif name == "Detail":
-            uncalibrated("Detail", _bounded(value, 0, 10) / 10,
-                         "Exploratory range mapping v/10; detector selectivity laws are not calibrated.")
+            uncalibrated("Detail", _bounded(value, 0, 10),
+                         "Both Detail controls use 0..10; bandwidth and detector strength remain approximate.")
         elif name in ("Attack", "Release"):
             bounds = (.1, 500) if name == "Attack" else (5, 2000)
             candidate = bounds[0] * (bounds[1] / bounds[0]) ** (_bounded(value, 0, 10) / 10)

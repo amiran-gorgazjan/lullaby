@@ -74,15 +74,23 @@ fn vocal_silk_adds_local_reduction_without_changing_remote_harmonics() {
 #[test]
 fn gentle_start_does_not_turn_broadband_noise_into_a_lowpass() {
     let signal = noise_fixture(48000);
-    for phase in [Phase::Minimum, Phase::Linear] {
-        let mut s = factory_preset(0);
-        s.phase = phase;
-        let m = measure(&signal, 48000.0, s);
-        assert!(
-            m.level_db > -0.75,
-            "broadband loss: {} dB in {phase:?}",
-            m.level_db
-        );
+    for quality in [
+        Quality::Normal,
+        Quality::High,
+        Quality::Ultra,
+        Quality::LowLatency,
+    ] {
+        for phase in [Phase::Minimum, Phase::Linear] {
+            let mut s = factory_preset(0);
+            s.phase = phase;
+            s.quality = quality;
+            let m = measure(&signal, 48000.0, s);
+            assert!(
+                m.level_db > -0.75,
+                "broadband loss: {} dB in {phase:?}/{quality:?}",
+                m.level_db
+            );
+        }
     }
 }
 
@@ -90,7 +98,7 @@ fn gentle_start_does_not_turn_broadband_noise_into_a_lowpass() {
 fn depth_increases_suppression_progressively_instead_of_saturating_at_default() {
     let signal = harmonic_fixture(48000.0, true);
     let mut reductions = Vec::new();
-    for depth in [0.0, 1.0, 3.0, 6.0, 12.0, 24.0] {
+    for depth in [0.0, 1.0, 3.0, 6.0, 8.0, 10.0] {
         let mut s = factory_preset(0);
         s.depth = depth;
         // Measure the depth law independently of the factory 12 dB ceiling.

@@ -38,7 +38,13 @@ fn audio_and_automation_never_allocate_or_free() {
     TRACK.with(|c| c.set(true));
     for i in 0..12000 {
         if i % 100 == 0 {
-            settings.depth = (i % 24) as f32;
+            settings.depth = (i % 11) as f32;
+            settings.detail = ((i / 100) % 11) as f32;
+            settings.detail_tilt = if i % 200 == 0 {
+                [-1.0, 1.0]
+            } else {
+                [1.0, -1.0]
+            };
             settings.phase = if i % 200 == 0 {
                 Phase::Minimum
             } else {

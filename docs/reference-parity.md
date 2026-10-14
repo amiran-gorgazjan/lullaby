@@ -163,7 +163,8 @@ is used; it is an observation for these captures, not a claim about all settings
 
 [`parity_adapter.py`](../scripts/reference/parity_adapter.py) records fixed,
 explicit exploratory conversions where the current plugins do not share a
-calibrated control law. Depth, Detail, unitless timing controls, frequency tilts,
+calibrated control law. Depth and Detail now expose unitless 0–10 scales; their independently calibrated
+strength/bandwidth laws still have measurable error. Unitless timing controls, frequency tilts,
 band depth/Q and unlimited reduction must not be treated as equivalent merely
 because their names resemble each other. These exploratory renders help
 diagnose the current behavior, while their capability tests remain red until
@@ -201,3 +202,24 @@ nonfinite audio, missing cases, changed checksums and unapplied controls cannot
 silently pass. They also guard the mixed-gain native routing assertion. These
 tests are part of public CI; the intentionally red licensed-reference suite is
 run locally and keeps its audio ignored by Git.
+
+## Parameter compatibility during parity development
+
+Depth now spans **0–10**, rather than 0–24, and Detail spans **0–10**, rather
+than 0–1. The editor labels the latter **Detail**, without a percentage. Depth is
+unitless strength; Detail controls the concentration and strength of spectral
+cuts, not a Q value or bandwidth in Hz. Matching the reference's labels and ranges
+does not prove identical processing. The reference adapter retains explicit
+uncalibrated-scale failures for both controls.
+
+Gentle start now uses Depth 3/Detail 5 as an intentional gentle Lullaby preset;
+this does not claim that Soothe3's factory default Depth is 3. Other Lullaby factory
+presets inherit that new gentle base unless they specify Depth themselves.
+
+This development change does **not** preserve the sound of earlier projects.
+Stable VST parameter IDs remain: old normalized Depth automation/state is now
+interpreted over 0–10 (for example an old displayed 6 at 25% becomes 2.5). Detail's
+normalized positions retain their new displayed counterparts (old 0.5 becomes 5),
+but its processing law has changed. Direct JSON `Settings` uses displayed units;
+old Detail 0.5 means 0.5 now, and old Depth values above 10 clamp to 10. Existing
+user presets should be reviewed and re-saved rather than assumed equivalent.

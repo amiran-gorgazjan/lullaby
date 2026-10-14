@@ -104,7 +104,7 @@ fn delta_plus_wet_reconstructs_dry() {
 #[test]
 fn native_delta_scales_with_mix_wet_trim_and_output_gain() {
     let s = Settings {
-        depth: 18.0,
+        depth: 10.0,
         phase: Phase::Linear,
         delta: true,
         ..Settings::default()
@@ -148,7 +148,7 @@ fn native_delta_scales_with_mix_wet_trim_and_output_gain() {
 fn resonances_are_reduced_and_max_cut_is_respected() {
     let s = Settings {
         max_cut_db: 6.0,
-        depth: 24.0,
+        depth: 10.0,
         phase: Phase::Linear,
         ..Settings::default()
     };
@@ -200,7 +200,7 @@ fn external_key_triggers_reduction() {
         external_sidechain: true,
         // Deliberately request strong processing. The default must not remove
         // several dB from an otherwise ordinary pair of musical tones.
-        depth: 18.0,
+        depth: 10.0,
         ..Settings::default()
     };
     let (_, e) = render(s, 16000, signal, signal);
@@ -307,4 +307,32 @@ fn presets_round_trip_and_partial_presets_use_defaults() {
     let s: Settings = serde_json::from_str(r#"{"depth": 3.0}"#).unwrap();
     assert_eq!(s.depth, 3.0);
     assert_eq!(s.release_ms, 120.0);
+}
+
+#[test]
+fn depth_and_detail_have_unitless_zero_to_ten_ranges() {
+    let s = Settings {
+        depth: 24.0,
+        detail: 12.0,
+        ..Settings::default()
+    }
+    .sanitized();
+    assert_eq!(s.depth, 10.0);
+    assert_eq!(s.detail, 10.0);
+    let s = Settings {
+        depth: f32::NAN,
+        detail: f32::NAN,
+        ..Settings::default()
+    }
+    .sanitized();
+    assert_eq!(s.depth, 3.0);
+    assert_eq!(s.detail, 5.0);
+    let s = Settings {
+        depth: -1.0,
+        detail: -1.0,
+        ..Settings::default()
+    }
+    .sanitized();
+    assert_eq!(s.depth, 0.0);
+    assert_eq!(s.detail, 0.0);
 }

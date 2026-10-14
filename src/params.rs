@@ -62,17 +62,24 @@ impl Default for LullabyParams {
         Self {
             depth: FloatParam::new(
                 "Depth",
-                6.0,
+                3.0,
                 FloatRange::Linear {
                     min: 0.0,
-                    max: 24.0,
+                    max: 10.0,
                 },
             )
             .with_unit("")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            detail: FloatParam::new("Detail", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_unit("")
-                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            detail: FloatParam::new(
+                "Detail",
+                5.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
+                },
+            )
+            .with_unit("")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
             attack_ms: FloatParam::new(
                 "Attack",
                 10.0,

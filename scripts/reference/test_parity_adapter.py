@@ -13,7 +13,7 @@ except ImportError:
 def inventory():
     """Public parameter metadata matching the checked-in Lullaby declaration."""
     controls = [
-        ("Depth", 0, 24), ("Detail", 0, 1), ("Attack", .1, 500), ("Release", 5, 2000),
+        ("Depth", 0, 10), ("Detail", 0, 10), ("Attack", .1, 500), ("Release", 5, 2000),
         ("Max cut", 0, 36), ("Stereo link", 0, 1), ("Stereo focus", -1, 1),
         *[(f"{control} / {side}", -1, 1) for control in ("Detail", "Attack", "Release")
           for side in ("low", "high")],
@@ -50,7 +50,7 @@ class AdapterTests(unittest.TestCase):
         for title in ("Depth", "Detail", "Attack", "Release"):
             self.assertEqual(issues[title]["code"], "uncalibrated_scale")
             self.assertIn("exploratory_value", issues[title])
-        self.assertEqual(result["expected_parameters"]["Detail"]["plain"], .5)
+        self.assertEqual(result["expected_parameters"]["Detail"]["plain"], 5)
         self.assertAlmostEqual(result["expected_parameters"]["Attack"]["plain"], math.sqrt(.1 * 500))
         self.assertNotEqual(result["expected_parameters"]["Release"]["plain"], 3)
 

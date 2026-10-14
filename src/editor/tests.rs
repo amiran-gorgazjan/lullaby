@@ -173,7 +173,7 @@ fn sustained_editor_rendering_has_bounded_live_memory() {
             Vec2::new(1152.0, 768.0)
         };
         let setter = test.gui.param_setter();
-        set(&setter, &test.host.params.depth, 12.0 + 6.0 * phase.sin());
+        set(&setter, &test.host.params.depth, 5.0 + 3.0 * phase.sin());
         test.frame(vec![], Modifiers::NONE);
         // The mock host's event log is instrumentation, not plugin state.
         test.host.events.lock().unwrap().clear();
@@ -257,7 +257,7 @@ fn rotary_drag_keeps_coalesced_release_motion_and_balances_host_gestures() {
             test.pointer(end, false, Modifiers::NONE);
         }
         assert!(
-            (test.host.params.depth.value() - 12.0).abs() < 0.001,
+            (test.host.params.depth.value() - 5.5).abs() < 0.001,
             "depth={}, events={:?}",
             test.host.params.depth.value(),
             test.host.events.lock().unwrap()
@@ -294,10 +294,7 @@ fn rotary_fine_drag_and_typed_values_use_the_existing_parameter_ranges() {
 #[test]
 fn percentage_readouts_accept_display_units_and_escape_cancels_edits() {
     let mut test = Harness::new(theme::SIZE);
-    for (x, param) in [
-        (148.0, test.host.params.detail.as_ptr()),
-        (1136.0, test.host.params.mix.as_ptr()),
-    ] {
+    for (x, param) in [(1136.0, test.host.params.mix.as_ptr())] {
         test.click(pos2(x, 877.0));
         test.replace_text("25 %");
         test.key(egui::Key::Enter);
@@ -321,7 +318,7 @@ fn graph_double_click_adds_an_existing_weighting_band() {
     let expected_hz = 20.0 * 1000.0_f32.powf((700.0 - 470.0) / 972.0);
     assert!((band.frequency.value() - expected_hz).abs() < 0.1);
     assert!(band.depth_db.value() > 0.0);
-    assert_eq!(test.host.params.depth.value(), 6.0);
+    assert_eq!(test.host.params.depth.value(), 3.0);
 }
 
 #[test]
@@ -349,4 +346,13 @@ fn redesigned_editor_retains_band_editing_and_factory_preset_history() {
     test.editor.file_panel = true;
     test.size = Vec2::new(960.0, 640.0);
     test.frame(vec![], Modifiers::NONE);
+}
+
+#[test]
+fn detail_readout_accepts_unitless_zero_to_ten_values() {
+    let mut test = Harness::new(theme::SIZE);
+    test.click(pos2(148.0, 877.0));
+    test.replace_text("7.5");
+    test.key(egui::Key::Enter);
+    assert!((test.host.params.detail.value() - 7.5).abs() < 0.001);
 }

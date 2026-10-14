@@ -33,6 +33,7 @@ struct Channel {
     reference: SpectralReference,
     magnitude_db: Vec<f32>,
     reduction: Vec<f32>,
+    requested: Vec<f32>,
     weight: Vec<f32>,
 }
 
@@ -49,6 +50,7 @@ impl Channel {
             reference: SpectralReference::new(n / 2 + 1),
             magnitude_db: vec![0.0; n / 2 + 1],
             reduction: vec![0.0; n / 2 + 1],
+            requested: vec![0.0; n / 2 + 1],
             weight: vec![0.0; n / 2 + 1],
         }
     }
@@ -88,6 +90,14 @@ pub struct Engine {
     release: Vec<f32>,
     reference_lower: Vec<usize>,
     reference_upper: Vec<usize>,
+    spread_lower: Vec<usize>,
+    spread_upper: Vec<usize>,
+    log_frequency: Vec<f32>,
+    spread_kernel_offsets: Vec<usize>,
+    spread_kernel_lower: Vec<usize>,
+    spread_kernel: Vec<f32>,
+    contrast_scale: Vec<f32>,
+    detail_strength: Vec<f32>,
     threshold: Vec<f32>,
     audition_mask: Vec<f32>,
     cached: Option<Settings>,
@@ -117,6 +127,21 @@ impl Engine {
         let scratch_len = forward
             .get_inplace_scratch_len()
             .max(inverse.get_inplace_scratch_len());
+        // Reserve the widest possible Detail envelope once. Automation only
+        // overwrites existing weights; the audio path never allocates.
+        let mut spread_kernel_offsets = Vec::with_capacity(n / 2 + 2);
+        let mut spread_kernel_lower = Vec::with_capacity(n / 2 + 1);
+        let mut kernel_count = 0;
+        let maximum_extent = (0.16_f32 + 0.6).exp2();
+        for k in 0..=n / 2 {
+            let extent = maximum_extent;
+            let lower = ((k as f32 / extent).floor() as usize).max(1);
+            let upper = ((k as f32 * extent).ceil() as usize + 1).min(n / 2 + 1);
+            spread_kernel_offsets.push(kernel_count);
+            spread_kernel_lower.push(lower);
+            kernel_count += upper.saturating_sub(lower);
+        }
+        spread_kernel_offsets.push(kernel_count);
         Self {
             sample_rate,
             quality,
@@ -139,6 +164,16 @@ impl Engine {
             release: vec![0.0; n / 2 + 1],
             reference_lower: vec![0; n / 2 + 1],
             reference_upper: vec![0; n / 2 + 1],
+            spread_lower: vec![0; n / 2 + 1],
+            spread_upper: vec![0; n / 2 + 1],
+            log_frequency: (0..=n / 2)
+                .map(|k| (k as f32 * sample_rate / n as f32).max(20.0).log2())
+                .collect(),
+            spread_kernel_offsets,
+            spread_kernel_lower,
+            spread_kernel: vec![0.0; kernel_count],
+            contrast_scale: vec![1.0; n / 2 + 1],
+            detail_strength: vec![0.0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
             cached: None,
@@ -193,15 +228,41 @@ impl Engine {
             return;
         }
         let first = self.cached.is_none();
+        let detail_changed = self
+            .cached
+            .is_none_or(|old| old.detail != s.detail || old.detail_tilt != s.detail_tilt);
         for k in 0..=self.n / 2 {
             let f = (k as f32 * self.sample_rate / self.n as f32).max(20.0);
             let low = 1.0 / (1.0 + (f / 500.0).powi(2));
             let high = 1.0 / (1.0 + (2000.0 / f).powi(2));
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
-            let detail = (s.detail + 0.5 * tilt(s.detail_tilt)).clamp(0.0, 1.0);
+            let detail = (s.detail / 10.0 + 0.5 * tilt(s.detail_tilt)).clamp(0.0, 1.0);
+            // Independent smooth cut-envelope model. Low Detail produces
+            // broader cuts; high Detail concentrates stronger cuts near peaks.
+            let spread_width = 0.16 + 0.6 * (1.0 - detail).powi(4);
+            let spread_extent = spread_width.exp2();
+            self.spread_lower[k] = ((k as f32 / spread_extent).floor() as usize).max(1);
+            self.spread_upper[k] =
+                ((k as f32 * spread_extent).ceil() as usize + 1).min(self.n / 2 + 1);
+            if detail_changed {
+                let inverse_width = 1.0 / spread_width;
+                for j in self.spread_lower[k]..self.spread_upper[k] {
+                    let distance = (self.log_frequency[j] - self.log_frequency[k]) * inverse_width;
+                    let index = self.spread_kernel_offsets[k] + j - self.spread_kernel_lower[k];
+                    self.spread_kernel[index] = (1.0 - distance * distance).max(0.0).powi(2);
+                }
+            }
+            self.detail_strength[k] =
+                ((detail - 0.5) * if detail < 0.5 { 1.085 } else { 2.918 }).exp2();
             let extent = (1.25 - 0.5 * detail).exp2();
             self.reference_lower[k] = (k as f32 / extent).floor() as usize;
             self.reference_upper[k] = ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
+            // A lone peak's mean-power contrast depends on bin density. Keep
+            // the smaller low-latency transform on a comparable contrast scale
+            // while leaving a flat/noise-like spectrum close to zero contrast.
+            let count = (self.reference_upper[k] - self.reference_lower[k]).max(2) as f32;
+            self.contrast_scale[k] =
+                ((count * 2048.0 / self.n as f32).ln() / count.ln()).clamp(1.0, 2.0);
             // Detail tilt affects contrast selection as well as bandwidth.
             // Higher depth gradually admits less prominent spectral features.
             self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
@@ -224,9 +285,12 @@ impl Engine {
         }
         self.target_trim = db_to_gain(s.wet_trim_db);
         self.target_gain = db_to_gain(s.output_db);
-        // Preserve the host's 0..24 scale but give it a useful gentle region:
-        // depth 0/6/12/24 -> 0/0.25/0.75/3.75 times detected excess in dB.
-        self.depth_amount = ((s.depth / 6.0).exp2() - 1.0) * 0.25;
+        // Independent global calibration: depth is a unitless 0..10 control.
+        // Soft is relative; Hard retains its separate absolute-level gate.
+        self.depth_amount = match s.mode {
+            Mode::Soft => 0.03 * s.depth.powf(1.15),
+            Mode::Hard => 0.025 * s.depth.powf(1.55),
+        };
         if first {
             self.mix = s.mix;
             self.trim = db_to_gain(s.wet_trim_db);
@@ -354,7 +418,8 @@ impl Engine {
                 &self.reference_upper,
             );
             for (k, &baseline) in reference.iter().enumerate() {
-                let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0);
+                let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0)
+                    * self.contrast_scale[k];
                 let activity = ((ch.magnitude_db[k] - floor - 3.0) / 12.0).clamp(0.0, 1.0);
                 let requested = match s.mode {
                     Mode::Soft => prominence * self.depth_amount,
@@ -362,17 +427,31 @@ impl Engine {
                         // Keep an absolute-level gate, with a progressive depth
                         // law. These are independent calibration hypotheses,
                         // not recovered Soothe3 equations.
-                        prominence.min((ch.magnitude_db[k] + 24.0 + s.depth * 2.0).max(0.0))
+                        prominence.min((ch.magnitude_db[k] + 36.0 + s.depth * 2.0).max(0.0))
                             * self.depth_amount
-                            * (s.depth / 3.0).clamp(1.0, 4.0)
                     }
                 };
                 // Partially filled startup windows invent broad spectral
                 // leakage. Wait for real context before deciding what rings.
-                let target = if self.filled < self.n || k == 0 || peak < -115.0 {
+                ch.requested[k] = if self.filled < self.n || k == 0 || peak < -115.0 {
                     0.0
                 } else {
-                    (requested * activity * ch.weight[k]).min(s.max_cut_db)
+                    requested * activity * self.detail_strength[k]
+                };
+            }
+            for k in 0..bins {
+                let mut spread = ch.requested[k];
+                let lower = self.spread_lower[k];
+                let upper = self.spread_upper[k];
+                let start = self.spread_kernel_offsets[k] + lower - self.spread_kernel_lower[k];
+                let weights = &self.spread_kernel[start..start + upper - lower];
+                for (&requested, &weight) in ch.requested[lower..upper].iter().zip(weights) {
+                    spread = spread.max(requested * weight);
+                }
+                let target = if k == 0 {
+                    0.0
+                } else {
+                    (spread * ch.weight[k]).min(s.max_cut_db)
                 };
                 let a = if target > ch.reduction[k] {
                     self.attack[k]
