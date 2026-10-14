@@ -96,6 +96,10 @@ pub struct Engine {
     spread_kernel_offsets: Vec<usize>,
     spread_kernel_lower: Vec<usize>,
     spread_kernel: Vec<f32>,
+    kernel_peak: Vec<f32>,
+    kernel_peak_distance_squared: Vec<f32>,
+    kernel_exponent: Vec<f32>,
+    kernel_scale: Vec<f32>,
     contrast_scale: Vec<f32>,
     detail_strength: Vec<f32>,
     threshold: Vec<f32>,
@@ -177,6 +181,10 @@ impl Engine {
             spread_kernel_offsets,
             spread_kernel_lower,
             spread_kernel: vec![0.0; kernel_count],
+            kernel_peak: vec![0.0; n / 2 + 1],
+            kernel_peak_distance_squared: vec![0.0; n / 2 + 1],
+            kernel_exponent: vec![0.0; n / 2 + 1],
+            kernel_scale: vec![0.0; n / 2 + 1],
             contrast_scale: vec![1.0; n / 2 + 1],
             detail_strength: vec![0.0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
@@ -243,7 +251,27 @@ impl Engine {
         // Independent render law, retained after the closer isolated-key
         // time-constant hypothesis worsened the phase-sensitive corpus score.
         let attack_seconds = 0.0001 * 5000.0_f32.powf(s.attack / 10.0);
-        let release_seconds = 0.005 * 400.0_f32.powf(s.release / 10.0);
+        // Preserve the low/default range; independent native key-off captures
+        // support a shorter upper range than the inherited two-second endpoint.
+        // Edge delay and overshoot remain separate, unresolved behavior.
+        let upper_release = ((s.release - 5.0) / 5.0).clamp(0.0, 1.0);
+        let upper_release = upper_release * upper_release * (3.0 - 2.0 * upper_release);
+        let release_seconds =
+            0.005 * 400.0_f32.powf(s.release / 10.0) * 0.35_f32.powf(upper_release);
+        // With neutral tilts, all rows share their source normalization.
+        // With active tilts, a separate arithmetic-only pass permits vectorized
+        // square roots before the scalar exponential loop. Preserve the same
+        // float operations and never approximate or quantize a coefficient.
+        let shared_width =
+            (s.detail_tilt == [1.0; 2]).then(|| 1.0 + 9.0 * (1.0 - s.detail / 10.0).powf(1.5));
+        if detail_changed && let Some(width) = shared_width {
+            fill_kernel_normalization(
+                &self.sqrt_frequency,
+                &mut self.kernel_peak,
+                &mut self.kernel_peak_distance_squared,
+                width,
+            );
+        }
         for k in 0..=self.n / 2 {
             let f = (k as f32 * self.sample_rate / self.n as f32).max(20.0);
             let low = 1.0 / (1.0 + (f / 500.0).powi(2));
@@ -266,18 +294,42 @@ impl Engine {
             .min(self.n / 2 + 1);
             if detail_changed {
                 let inverse_width = 1.0 / spread_width;
-                for j in self.spread_lower[k]..self.spread_upper[k] {
-                    let distance =
-                        (self.sqrt_frequency[j] - self.sqrt_frequency[k]) * inverse_width;
-                    let index = self.spread_kernel_offsets[k] + j - self.spread_kernel_lower[k];
-                    let source = self.sqrt_frequency[j];
-                    let peak = 0.5
-                        * (source + (source * source + 2.0 * spread_width * spread_width).sqrt());
-                    let peak_distance = (peak - source) * inverse_width;
+                let range = self.spread_lower[k]..self.spread_upper[k];
+                if shared_width.is_none() {
+                    fill_kernel_normalization(
+                        &self.sqrt_frequency[range.clone()],
+                        &mut self.kernel_peak[range.clone()],
+                        &mut self.kernel_peak_distance_squared[range.clone()],
+                        spread_width,
+                    );
+                }
+                let frequencies = &self.sqrt_frequency[range.clone()];
+                let peaks = &self.kernel_peak[range.clone()];
+                let peak_squared = &self.kernel_peak_distance_squared[range.clone()];
+                let exponents = &mut self.kernel_exponent[range.clone()];
+                let scales = &mut self.kernel_scale[range.clone()];
+                for ((((&frequency, &peak), &squared), exponent), scale) in frequencies
+                    .iter()
+                    .zip(peaks)
+                    .zip(peak_squared)
+                    .zip(exponents)
+                    .zip(scales)
+                {
+                    let distance = (frequency - self.sqrt_frequency[k]) * inverse_width;
+                    *exponent = squared - distance * distance;
+                    *scale = center / peak;
+                }
+                let start =
+                    self.spread_kernel_offsets[k] + range.start - self.spread_kernel_lower[k];
+                let output = &mut self.spread_kernel[start..start + range.len()];
+                for ((weight, &exponent), &scale) in output
+                    .iter_mut()
+                    .zip(&self.kernel_exponent[range.clone()])
+                    .zip(&self.kernel_scale[range])
+                {
                     // Smooth frequency-density skew, normalized to keep the
                     // requested maximum unchanged rather than adding gain.
-                    self.spread_kernel[index] =
-                        center / peak * (peak_distance * peak_distance - distance * distance).exp();
+                    *weight = scale * exponent.exp();
                 }
             }
             self.detail_strength[k] =
@@ -597,5 +649,16 @@ impl Engine {
                 );
             }
         }
+    }
+}
+
+// Kept separate from exp() calls so the source-normalization arithmetic can
+// vectorize. Scratch storage is bounded at construction and shared by channels.
+fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [f32], width: f32) {
+    let inverse_width = 1.0 / width;
+    for ((&source, peak), squared) in sources.iter().zip(peaks).zip(squared) {
+        *peak = 0.5 * (source + (source * source + 2.0 * width * width).sqrt());
+        let distance = (*peak - source) * inverse_width;
+        *squared = distance * distance;
     }
 }

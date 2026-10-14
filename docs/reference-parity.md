@@ -322,3 +322,18 @@ measurable error, not recovered proprietary equations or a fixed equal-loudness
 EQ. Allocation and musical regression guards remain; one old local-EQ spread
 expectation was corrected after exact native exports contradicted it, retaining
 the original protection for remote bass.
+
+The upper half of Release now shortens the inherited excessively long response,
+using independent key-off observations and a lower full-corpus residual. Values
+0–5, including the default 3, keep their previous response. Higher saved values
+remain addressable with the same units and range but deliberately sound different.
+Observed native edge delay and overshoot are still unresolved; the internal
+one-pole time scale is not an exact measurement of the displayed Release control.
+
+Detail kernel configuration separates shared normalization and vectorizable
+arithmetic from exponentials. It preserves coefficients and audio without
+quantization or deferred updates, using bounded scratch allocated at construction.
+Allocation-free automation does not guarantee a host deadline: the local 96 kHz,
+Ultra, 64-sample audit still observes block-time spikes under rapidly changing
+Detail or its tilts. Larger blocks provide more headroom; no universal DAW CPU
+or glitch-free automation claim follows from these local measurements.

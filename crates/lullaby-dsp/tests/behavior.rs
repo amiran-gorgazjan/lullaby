@@ -726,3 +726,53 @@ fn steady_external_resonance_has_smooth_minimum_phase_skirts() {
     );
     assert!(remote.0.abs() < 0.25, "remote tone: {remote:?}");
 }
+
+#[test]
+fn upper_release_controls_keep_recovery_ordered() {
+    let base = Settings {
+        depth: 10.0,
+        attack: 0.0,
+        external_sidechain: true,
+        ..Settings::default()
+    };
+    let mut previous = f32::INFINITY;
+    for release in [5.0, 7.0, 9.0, 10.0] {
+        let gain = keyed_sine_level(Settings { release, ..base }, 1056.0, 2.4, 2.5);
+        assert!(
+            gain < previous - 0.2,
+            "Release {release}: {gain}, previous {previous}"
+        );
+        previous = gain;
+    }
+}
+
+#[test]
+fn detail_automation_replaces_prior_kernel_configuration() {
+    for final_tilts in [[1.0; 2], [0.8, 1.25]] {
+        let mut reused = Engine::new(48000.0, Quality::Normal, false);
+        for (detail, detail_tilt) in [(0.0, [10.0, 0.1]), (10.0, [1.0; 2]), (3.0, [0.1, 10.0])] {
+            reused.set_settings(Settings {
+                detail,
+                detail_tilt,
+                ..Settings::default()
+            });
+        }
+        let final_settings = Settings {
+            depth: 8.0,
+            detail: 5.0,
+            detail_tilt: final_tilts,
+            ..Settings::default()
+        };
+        reused.set_settings(final_settings);
+        let mut fresh = Engine::new(48000.0, Quality::Normal, false);
+        fresh.set_settings(final_settings);
+        for i in 0..12000 {
+            let input = signal(i);
+            assert_eq!(
+                reused.process_sample(input, [0.0; 2]),
+                fresh.process_sample(input, [0.0; 2]),
+                "Detail tilts {final_tilts:?}, sample {i}"
+            );
+        }
+    }
+}
