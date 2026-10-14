@@ -98,7 +98,7 @@ fn measurement_renders_are_latency_aligned_and_keep_the_entire_input() {
 }
 
 #[test]
-fn boosting_a_quiet_gap_does_not_force_suppression_of_nearby_notes() {
+fn boosting_a_quiet_gap_preserves_remote_notes_and_bounds_local_spread() {
     let clean = musical_mix(2);
     let input = peaking_eq(&clean, 750.0, 18.0, 8.0);
     let settings = Settings {
@@ -114,9 +114,14 @@ fn boosting_a_quiet_gap_does_not_force_suppression_of_nearby_notes() {
     let clean_after = band_energy(&clean_output, &bands);
     for i in 0..bands.len() {
         let added_cut = ratio_db(after[i], before[i]) - ratio_db(clean_after[i], clean_before[i]);
+        // Exact licensed-native exports of these same Rust-generated inputs
+        // change the EQ region by -1.539 dB, and remote bass by +0.377 dB.
+        // The old 1 dB bound rejected the reference in the EQ region itself.
+        // Preserve the remote limit; permit useful smooth skirts near the EQ.
+        let limit = if i == 0 { 2.0 } else { 1.0 };
         assert!(
-            added_cut.abs() < 1.0,
-            "boosting a quiet gap changes neighboring suppression by {added_cut:.3} dB"
+            added_cut.abs() < limit,
+            "boosting a quiet gap changes band {i} suppression by {added_cut:.3} dB"
         );
     }
 }

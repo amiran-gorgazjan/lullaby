@@ -92,7 +92,7 @@ pub struct Engine {
     reference_upper: Vec<usize>,
     spread_lower: Vec<usize>,
     spread_upper: Vec<usize>,
-    log_frequency: Vec<f32>,
+    sqrt_frequency: Vec<f32>,
     spread_kernel_offsets: Vec<usize>,
     spread_kernel_lower: Vec<usize>,
     spread_kernel: Vec<f32>,
@@ -132,11 +132,15 @@ impl Engine {
         let mut spread_kernel_offsets = Vec::with_capacity(n / 2 + 2);
         let mut spread_kernel_lower = Vec::with_capacity(n / 2 + 1);
         let mut kernel_count = 0;
-        let maximum_extent = (0.16_f32 + 0.6).exp2();
+        let maximum_radius = 3.0 * 10.0;
         for k in 0..=n / 2 {
-            let extent = maximum_extent;
-            let lower = ((k as f32 / extent).floor() as usize).max(1);
-            let upper = ((k as f32 * extent).ceil() as usize + 1).min(n / 2 + 1);
+            let center = (k as f32 * sample_rate / n as f32).sqrt();
+            let lower = (((center - maximum_radius).max(0.0).powi(2) * n as f32 / sample_rate)
+                .floor() as usize)
+                .max(1);
+            let upper =
+                (((center + maximum_radius).powi(2) * n as f32 / sample_rate).ceil() as usize + 1)
+                    .min(n / 2 + 1);
             spread_kernel_offsets.push(kernel_count);
             spread_kernel_lower.push(lower);
             kernel_count += upper.saturating_sub(lower);
@@ -166,8 +170,8 @@ impl Engine {
             reference_upper: vec![0; n / 2 + 1],
             spread_lower: vec![0; n / 2 + 1],
             spread_upper: vec![0; n / 2 + 1],
-            log_frequency: (0..=n / 2)
-                .map(|k| (k as f32 * sample_rate / n as f32).max(20.0).log2())
+            sqrt_frequency: (0..=n / 2)
+                .map(|k| (k as f32 * sample_rate / n as f32).sqrt())
                 .collect(),
             spread_kernel_offsets,
             spread_kernel_lower,
@@ -244,19 +248,34 @@ impl Engine {
             let high = 1.0 / (1.0 + (2000.0 / f).powi(2));
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
             let detail = (s.detail / 10.0 + 0.5 * tilt(detail_tilt)).clamp(0.0, 1.0);
-            // Independent smooth cut-envelope model. Low Detail produces
-            // broader cuts; high Detail concentrates stronger cuts near peaks.
-            let spread_width = 0.155 + 0.6 * (1.0 - detail).powi(4);
-            let spread_extent = spread_width.exp2();
-            self.spread_lower[k] = ((k as f32 / spread_extent).floor() as usize).max(1);
-            self.spread_upper[k] =
-                ((k as f32 * spread_extent).ceil() as usize + 1).min(self.n / 2 + 1);
+            // Independently modeled Gaussian cut envelope in square-root
+            // frequency. Its absolute bandwidth grows with frequency while its
+            // relative bandwidth narrows; Detail controls concentration.
+            let spread_width = 1.0 + 9.0 * (1.0 - detail).powf(1.5);
+            let radius = 3.0 * spread_width;
+            let center = self.sqrt_frequency[k];
+            self.spread_lower[k] = (((center - radius).max(0.0).powi(2) * self.n as f32
+                / self.sample_rate)
+                .floor() as usize)
+                .max(1);
+            self.spread_upper[k] = (((center + radius).powi(2) * self.n as f32 / self.sample_rate)
+                .ceil() as usize
+                + 1)
+            .min(self.n / 2 + 1);
             if detail_changed {
                 let inverse_width = 1.0 / spread_width;
                 for j in self.spread_lower[k]..self.spread_upper[k] {
-                    let distance = (self.log_frequency[j] - self.log_frequency[k]) * inverse_width;
+                    let distance =
+                        (self.sqrt_frequency[j] - self.sqrt_frequency[k]) * inverse_width;
                     let index = self.spread_kernel_offsets[k] + j - self.spread_kernel_lower[k];
-                    self.spread_kernel[index] = (1.0 - distance * distance).max(0.0).powi(2);
+                    let source = self.sqrt_frequency[j];
+                    let peak = 0.5
+                        * (source + (source * source + 2.0 * spread_width * spread_width).sqrt());
+                    let peak_distance = (peak - source) * inverse_width;
+                    // Smooth frequency-density skew, normalized to keep the
+                    // requested maximum unchanged rather than adding gain.
+                    self.spread_kernel[index] =
+                        center / peak * (peak_distance * peak_distance - distance * distance).exp();
                 }
             }
             self.detail_strength[k] =

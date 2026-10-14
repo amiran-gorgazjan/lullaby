@@ -268,8 +268,19 @@ a relative activity gate, informed by independent isolated/equal-amplitude/
 unequal-amplitude tone observations. Weak partials 40 dB below a dominant tone no
 longer receive the same suppression as a loud isolated high tone. Depth also
 changes contrast selection at low values instead of only scaling every cut.
-Hard retains its separate absolute-level gate. The common cut envelope is
-slightly narrower to preserve the existing locality guard. These are general
-independent models with measurable error, not recovered proprietary equations
-or a fixed equal-loudness EQ. The native Delta null and uncalibrated-scale
-failures remain the acceptance authority.
+Hard retains its separate absolute-level gate. The native Delta null and
+uncalibrated-scale failures remain the acceptance authority.
+
+The shared cut envelope now uses smooth Gaussian skirts in square-root frequency
+with a normalized frequency-density skew. Detail controls their width, while the
+absolute bandwidth grows with frequency and the relative bandwidth narrows.
+Independent external-key multisine captures support broader low-Detail skirts
+and a different concentration at high Detail than the previous compact envelope.
+The model reduces the full-corpus residual overall, with remaining timing,
+frequency-tilt, sidechain and isolated-response mismatches. No parameter IDs,
+ranges, defaults, state units or declared latency change in this step, but earlier
+projects will sound different. These are independently constructed models with
+measurable error, not recovered proprietary equations or a fixed equal-loudness
+EQ. Allocation and musical regression guards remain; one old local-EQ spread
+expectation was corrected after exact native exports contradicted it, retaining
+the original protection for remote bass.

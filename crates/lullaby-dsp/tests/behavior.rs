@@ -541,3 +541,63 @@ fn depth_and_detail_have_unitless_zero_to_ten_ranges() {
     assert_eq!(s.depth, 0.0);
     assert_eq!(s.detail, 0.0);
 }
+
+#[test]
+fn steady_external_resonance_has_smooth_minimum_phase_skirts() {
+    use rustfft::num_complex::Complex64;
+    let frequencies = [743.0_f64, 1056.0, 1369.0, 2121.0];
+    let main = |i: usize| {
+        let t = i as f64 / 48000.0;
+        [frequencies
+            .iter()
+            .map(|f| (std::f64::consts::TAU * f * t).sin() * 0.01)
+            .sum::<f64>() as f32; 2]
+    };
+    let key =
+        |i: usize| [(std::f64::consts::TAU * 1056.0 * i as f64 / 48000.0).sin() as f32 * 0.3; 2];
+    let (wet, engine) = render(
+        Settings {
+            depth: 10.0,
+            max_cut_db: MAX_CUT_OFF,
+            external_sidechain: true,
+            ..Settings::default()
+        },
+        48000 * 4,
+        main,
+        key,
+    );
+    let transfer = |frequency: f64| {
+        let mut x = Complex64::default();
+        let mut y = Complex64::default();
+        // Integer-Hz tones over exactly one settled second. Remove only the
+        // declared latency; no gain, phase or time fitting enters this guard.
+        for i in 48000 * 2..48000 * 3 {
+            let basis =
+                Complex64::from_polar(1.0, -std::f64::consts::TAU * frequency * i as f64 / 48000.0);
+            x += basis * main(i)[0] as f64;
+            y += basis * wet[i + engine.latency_samples()][0] as f64;
+        }
+        let gain = y / x;
+        (-20.0 * gain.norm().log10(), gain.arg().to_degrees())
+    };
+    let below = transfer(frequencies[0]);
+    let center = transfer(frequencies[1]);
+    let above = transfer(frequencies[2]);
+    let remote = transfer(frequencies[3]);
+    // Independent native held-key probes have broad audible skirts here,
+    // opposite phase below/above the cut and negligible far-away attenuation.
+    // These deliberately broad bounds guard musical behavior, not exact parity.
+    assert!(
+        below.0 > 0.25 && above.0 > 0.5,
+        "skirts: {below:?}, {above:?}"
+    );
+    assert!(
+        center.0 > below.0 + 2.0 && center.0 > above.0 + 2.0,
+        "center: {center:?}"
+    );
+    assert!(
+        below.1 < -5.0 && above.1 > 5.0,
+        "minimum phase: {below:?}, {above:?}"
+    );
+    assert!(remote.0.abs() < 0.25, "remote tone: {remote:?}");
+}
