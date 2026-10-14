@@ -171,6 +171,17 @@ because their names resemble each other. These exploratory renders help
 diagnose the current behavior, while their capability tests remain red until
 the feature/control contract is implemented and verified.
 
+Hard now uses an independently modeled soft knee in absolute detector level,
+with a frequency-dependent threshold that Depth moves. Relative contrast selects
+spectral activity rather than capping every loud peak at the same contrast-based
+amount. This preserves bass at low Depth while allowing more suppression at
+high Depth. Separate equal-level tones and flat/pink noise were measured through
+the licensed native reference to check this behavior; they are diagnostic
+evidence outside the unchanged 25-case acceptance corpus. Broadband high-Depth
+suppression, phase and timing still differ, so this is not a recovered reference
+algorithm or proof of equivalent control scales. Soft is unchanged by this step.
+Earlier Hard settings retain their displayed values but change sound.
+
 Max cut uses finite dB limits below 24; the 24 endpoint displays **Off** and
 disables the reduction cap. The adapter sends Off directly and checks the 24
 plain-value readback; it no longer substitutes a finite 36 dB ceiling. This only

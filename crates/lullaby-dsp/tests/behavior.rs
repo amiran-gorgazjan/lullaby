@@ -289,6 +289,68 @@ fn hard_mode_responds_to_absolute_level() {
 }
 
 #[test]
+fn hard_low_depth_preserves_bass_and_selects_absolute_high_frequency_activity() {
+    let frequencies = [120.0_f64, 1056.0, 4200.0, 8000.0, 11000.0];
+    let mut cuts = [[[0.0; 5]; 2]; 2];
+    for (depth_index, depth) in [3.0, 10.0].into_iter().enumerate() {
+        for (level_index, amplitude) in [0.1, 0.01].into_iter().enumerate() {
+            let input = |i: usize| {
+                let t = i as f64 / 48000.0;
+                [frequencies
+                    .iter()
+                    .enumerate()
+                    .map(|(j, f)| {
+                        amplitude * (std::f64::consts::TAU * f * t + 0.17 * j as f64).sin()
+                    })
+                    .sum::<f64>() as f32; 2]
+            };
+            let (out, engine) = render(
+                Settings {
+                    mode: Mode::Hard,
+                    depth,
+                    max_cut_db: MAX_CUT_OFF,
+                    ..Settings::default()
+                },
+                146048,
+                input,
+                |_| [0.0; 2],
+            );
+            for (tone, frequency) in frequencies.iter().enumerate() {
+                let mut dry = [0.0_f64; 2];
+                let mut wet = [0.0_f64; 2];
+                for i in 96000..144000 {
+                    let angle = std::f64::consts::TAU * frequency * i as f64 / 48000.0;
+                    for (j, basis) in [angle.cos(), angle.sin()].into_iter().enumerate() {
+                        dry[j] += input(i)[0] as f64 * basis;
+                        wet[j] += out[i + engine.latency_samples()][0] as f64 * basis;
+                    }
+                }
+                cuts[depth_index][level_index][tone] =
+                    -20.0 * (wet[0].hypot(wet[1]) / dry[0].hypot(dry[1])).log10();
+            }
+        }
+    }
+    // Independent native equal-tone probes give about .025 dB at 120 Hz and
+    // 4..5 dB above 4 kHz at Hard3. This guards the frequency distinction,
+    // rather than copying a fitted threshold or expecting complete parity.
+    assert!(cuts[0][0][0] < 0.25, "low Depth overcuts bass: {cuts:?}");
+    for tone in 2..5 {
+        assert!(cuts[0][0][tone] > 2.0, "high peaks escape Hard3: {cuts:?}");
+        assert!(
+            cuts[0][1][tone] < cuts[0][0][tone] - 1.0,
+            "Hard3 ignores absolute input level: {cuts:?}"
+        );
+    }
+    assert!(cuts[1][0][0] > 5.0, "Hard10 exempts bass: {cuts:?}");
+    for tone in 0..5 {
+        assert!(
+            cuts[1][0][tone] > cuts[1][1][tone] + 3.0,
+            "Hard10 saturates before responding to input level: {cuts:?}"
+        );
+    }
+}
+
+#[test]
 fn silent_external_sidechain_does_not_reduce_main_input() {
     let s = Settings {
         external_sidechain: true,

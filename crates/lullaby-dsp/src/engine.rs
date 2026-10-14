@@ -99,6 +99,7 @@ pub struct Engine {
     contrast_scale: Vec<f32>,
     detail_strength: Vec<f32>,
     threshold: Vec<f32>,
+    hard_threshold: Vec<f32>,
     audition_mask: Vec<f32>,
     cached: Option<Settings>,
     mix: f32,
@@ -179,6 +180,7 @@ impl Engine {
             contrast_scale: vec![1.0; n / 2 + 1],
             detail_strength: vec![0.0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
+            hard_threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
             cached: None,
             mix: 1.0,
@@ -306,6 +308,12 @@ impl Engine {
             if s.mode == Mode::Soft {
                 self.threshold[k] += 3.0 * (10.0 - s.depth) / (s.depth + 1.0);
             }
+            // Independent Hard-mode soft-knee threshold model. Equal-level
+            // native tone probes show much higher low-frequency thresholds,
+            // while Depth moves the threshold through absolute input levels.
+            let hard_frequency = (f / 1000.0).powf(1.1);
+            self.hard_threshold[k] =
+                -42.0 * hard_frequency / (1.0 + hard_frequency) + 8.0 * (3.0 - s.depth);
             // Mild frequency-dependent response, independently tilted at either end.
             let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
             let coefficient = |seconds: f32, t: [f32; 2]| {
@@ -329,7 +337,7 @@ impl Engine {
         // Soft is relative; Hard retains its separate absolute-level gate.
         self.depth_amount = match s.mode {
             Mode::Soft => 0.03 * s.depth.powf(1.15),
-            Mode::Hard => 0.025 * s.depth.powf(1.55),
+            Mode::Hard => 0.25 * (1.0 - (-2.0 * s.depth).exp()),
         };
         if first {
             self.mix = s.mix;
@@ -472,11 +480,15 @@ impl Engine {
                 let requested = match s.mode {
                     Mode::Soft => prominence * self.depth_amount,
                     Mode::Hard => {
-                        // Keep an absolute-level gate, with a progressive depth
-                        // law. These are independent calibration hypotheses,
-                        // not recovered Soothe3 equations.
-                        prominence.min((ch.magnitude_db[k] + 36.0 + s.depth * 2.0).max(0.0))
-                            * self.depth_amount
+                        let excess = (ch.magnitude_db[k] - self.hard_threshold[k]) / 5.0;
+                        let knee = if excess > 20.0 {
+                            excess
+                        } else {
+                            excess.exp().ln_1p()
+                        };
+                        // Contrast selects tonal activity rather than limiting
+                        // every loud peak to the same relative reduction.
+                        5.0 * knee * self.depth_amount * (prominence / 3.0).clamp(0.0, 1.0)
                     }
                 };
                 // Partially filled startup windows invent broad spectral
