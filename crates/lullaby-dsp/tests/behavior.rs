@@ -161,6 +161,113 @@ fn resonances_are_reduced_and_max_cut_is_respected() {
 }
 
 #[test]
+fn max_cut_off_removes_the_cap_and_preserves_finite_endpoint_state() {
+    let mut s = Settings {
+        mode: Mode::Hard,
+        depth: 10.0,
+        detail: 10.0,
+        attack: 0.0,
+        max_cut_db: MAX_CUT_OFF,
+        ..Settings::default()
+    };
+    s.bands[0] = Band::bell(1500.0, 24.0, 2.0);
+    assert_eq!(s.limit_reduction(1000.0), 1000.0);
+    let json = serde_json::to_string(&s).unwrap();
+    assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), s);
+    for quality in [
+        Quality::Normal,
+        Quality::High,
+        Quality::Ultra,
+        Quality::LowLatency,
+    ] {
+        for phase in [Phase::Minimum, Phase::Linear] {
+            let (off, engine) = render(
+                Settings {
+                    quality,
+                    phase,
+                    ..s
+                },
+                16000,
+                signal,
+                |_| [0.0; 2],
+            );
+            assert!(
+                engine.meter().peak_reduction_db > 36.0,
+                "{quality:?}/{phase:?}"
+            );
+            assert!(off.iter().flatten().all(|x| x.is_finite() && x.abs() < 1.0));
+        }
+    }
+    for limit in [0.0, 3.0, 12.0, 23.99] {
+        let (_, engine) = render(
+            Settings {
+                max_cut_db: limit,
+                ..s
+            },
+            16000,
+            signal,
+            |_| [0.0; 2],
+        );
+        assert!(engine.meter().peak_reduction_db <= limit, "cap={limit}");
+    }
+    assert_eq!(
+        Settings {
+            max_cut_db: 36.0,
+            ..s
+        }
+        .sanitized()
+        .max_cut_db,
+        MAX_CUT_OFF
+    );
+    assert_eq!(
+        Settings {
+            max_cut_db: f32::NAN,
+            ..s
+        }
+        .sanitized()
+        .max_cut_db,
+        12.0
+    );
+}
+
+#[test]
+fn relative_activity_retains_loud_high_tones_and_rejects_very_quiet_partials() {
+    let s = Settings {
+        depth: 10.0,
+        max_cut_db: MAX_CUT_OFF,
+        phase: Phase::Linear,
+        ..Settings::default()
+    };
+    let upper_gain = |amplitude: f32| {
+        let input = |i: usize| {
+            let t = i as f32 / 48000.0;
+            [0.1 * (TAU * 1056.0 * t).sin() + amplitude * (TAU * 4500.0 * t).sin(); 2]
+        };
+        let (out, e) = render(s, 146048, input, |_| [0.0; 2]);
+        let mut dry = [0.0_f64; 2];
+        let mut wet = [0.0_f64; 2];
+        for i in 96000..144000 {
+            let angle = std::f64::consts::TAU * 4500.0 * i as f64 / 48000.0;
+            let basis = [angle.cos(), angle.sin()];
+            for j in 0..2 {
+                dry[j] += input(i)[0] as f64 * basis[j];
+                wet[j] += out[i + e.latency_samples()][0] as f64 * basis[j];
+            }
+        }
+        20.0 * (wet[0].hypot(wet[1]) / dry[0].hypot(dry[1])).log10()
+    };
+    let loud = upper_gain(0.1);
+    let quieter = upper_gain(0.01);
+    let quiet = upper_gain(0.001);
+    assert!(loud < -8.0, "loud isolated high tone was exempt: {loud}");
+    assert!(
+        quieter > loud + 2.0,
+        "relative activity is insensitive: {loud}/{quieter}"
+    );
+    assert!(quiet > -0.75, "weak upper partial is overcut: {quiet}");
+}
+
+#[test]
 fn soft_mode_is_level_invariant_above_noise_floor() {
     let s = Settings::default();
     let (a, _) = render(s, 16000, signal, |_| [0.0; 2]);

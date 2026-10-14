@@ -42,6 +42,7 @@ fn vst3_depth_values_and_processed_audio_match_the_dsp() {
         let controller = component.cast::<IEditController>().unwrap();
         let processor = component.cast::<IAudioProcessor>().unwrap();
         let mut depth_id = None;
+        let mut max_cut_id = None;
         for i in 0..controller.getParameterCount() {
             let mut info: ParameterInfo = std::mem::zeroed();
             assert_eq!(controller.getParameterInfo(i, &mut info), kResultOk);
@@ -50,13 +51,31 @@ fn vst3_depth_values_and_processed_audio_match_the_dsp() {
                 .iter()
                 .position(|c| *c == 0)
                 .unwrap_or(info.title.len());
-            if String::from_utf16_lossy(&info.title[..len]) == "Depth" {
+            let title = String::from_utf16_lossy(&info.title[..len]);
+            if title == "Depth" {
                 depth_id = Some(info.id);
-                assert!((info.defaultNormalizedValue - 0.25).abs() < 1e-6);
+                assert!((info.defaultNormalizedValue - 0.3).abs() < 1e-6);
+            } else if title == "Max cut" {
+                max_cut_id = Some(info.id);
+                assert!((info.defaultNormalizedValue - 0.5).abs() < 1e-6);
             }
         }
         let depth_id = depth_id.expect("exported Depth parameter");
-        assert!((controller.getParamNormalized(depth_id) - 0.25).abs() < 1e-6);
+        let max_cut_id = max_cut_id.expect("exported Max cut parameter");
+        assert!((controller.getParamNormalized(depth_id) - 0.3).abs() < 1e-6);
+        assert_eq!(controller.normalizedParamToPlain(max_cut_id, 1.0), 24.0);
+        let mut text = [0_u16; 128];
+        assert_eq!(
+            controller.getParamStringByValue(max_cut_id, 1.0, &mut text),
+            kResultOk
+        );
+        assert_eq!(&text[..4], &[79, 102, 102, 0]); // Off
+        let mut normalized = 0.0;
+        assert_eq!(
+            controller.getParamValueByString(max_cut_id, text.as_mut_ptr(), &mut normalized),
+            kResultOk
+        );
+        assert_eq!(normalized, 1.0);
         let mut input_arrangements = [3_u64, 3_u64]; // VST3 stereo L|R
         let mut output_arrangements = [3_u64];
         assert_eq!(
@@ -69,12 +88,22 @@ fn vst3_depth_values_and_processed_audio_match_the_dsp() {
             kResultOk
         );
         let input = support::harmonic_fixture(48000.0, true);
-        for (normalized, plain) in [(0.25, 6.0), (0.0, 0.0), (0.5, 12.0)] {
+        for (normalized, plain, max_cut_db) in [
+            (0.3, 3.0, 12.0),
+            (0.0, 0.0, 12.0),
+            (0.5, 5.0, 12.0),
+            (1.0, 10.0, 24.0),
+            (1.0, 10.0, 3.0),
+        ] {
             assert_eq!(
                 controller.setParamNormalized(depth_id, normalized),
                 kResultOk
             );
             assert!((controller.normalizedParamToPlain(depth_id, normalized) - plain).abs() < 1e-6);
+            assert_eq!(
+                controller.setParamNormalized(max_cut_id, max_cut_db / 24.0),
+                kResultOk
+            );
             let mut setup = ProcessSetup {
                 processMode: 0,
                 symbolicSampleSize: 0,
@@ -88,6 +117,7 @@ fn vst3_depth_values_and_processed_audio_match_the_dsp() {
             let mut reference = Engine::new(48000.0, lullaby_dsp::Quality::Normal, false);
             reference.set_settings(Settings {
                 depth: plain as f32,
+                max_cut_db: max_cut_db as f32,
                 ..Settings::default()
             });
             let mut left = [0.0_f32; 256];

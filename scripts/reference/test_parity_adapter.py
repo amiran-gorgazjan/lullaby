@@ -13,7 +13,7 @@ def inventory():
     """Public parameter metadata matching the checked-in Lullaby declaration."""
     controls = [
         ("Depth", 0, 10), ("Detail", 0, 10), ("Attack", 0, 10), ("Release", 0, 10),
-        ("Max cut", 0, 36), ("Stereo link", 0, 1), ("Stereo focus", -1, 1),
+        ("Max cut", 0, 24), ("Stereo link", 0, 1), ("Stereo focus", -1, 1),
         *[(f"{control} / {side}", .1, 10) for control in ("Detail", "Attack", "Release")
           for side in ("low", "high")],
         ("Mix", 0, 1), ("Wet trim", -24, 24), ("Output", -24, 24),
@@ -105,13 +105,20 @@ class AdapterTests(unittest.TestCase):
         missing = [p for p in inventory() if p["name"] != "Delta"]
         self.assertFalse(plan_case({"settings": {}}, missing)["renderable"])
 
-    def test_maximum_cut_off_is_a_failure_not_a_silent_finite_substitute(self):
+    def test_maximum_cut_off_is_real_endpoint_not_a_finite_substitute(self):
         result = self.plan()
-        self.assertEqual(result["host_settings"]["Max cut"], "36")
-        self.assertTrue(any(p["code"] == "missing_unlimited_cut" for p in result["unsupported"]))
+        self.assertEqual(result["host_settings"]["Max cut"], "Off")
+        self.assertEqual(result["expected_parameters"]["Max cut"]["plain"], 24)
+        self.assertFalse(any(p["source_parameter"] == "Max cut" for p in result["unsupported"]))
         limited = self.plan({"Max cut": "3"}, automation=[{"frame": 168000, "parameter": "Max cut", "value": "12"}])
         self.assertFalse(any(p["source_parameter"] == "Max cut" for p in limited["unsupported"]))
         self.assertEqual(limited["host_automation"][0]["value"], "12")
+        endpoint = self.plan({"Max cut": "23.9"}, automation=[{"frame": 1000, "parameter": "Max cut", "value": "off"}])
+        self.assertEqual(endpoint["host_settings"]["Max cut"], "23.9")
+        self.assertEqual(endpoint["host_automation"][0]["value"], "Off")
+        invalid = self.plan({"Max cut": "36"})
+        self.assertTrue(any(p["source_parameter"] == "Max cut" and p["code"] == "unmappable_control"
+                            for p in invalid["unsupported"]))
 
     def test_unknown_controls_and_normalized_depth_are_explicit_failures(self):
         result = self.plan({"Future feature": "on", "Depth": {"raw": .3}})

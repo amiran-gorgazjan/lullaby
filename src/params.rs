@@ -105,11 +105,23 @@ impl Default for LullabyParams {
                 12.0,
                 FloatRange::Linear {
                     min: 0.0,
-                    max: 36.0,
+                    max: MAX_CUT_OFF,
                 },
             )
-            .with_unit(" dB")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            .with_unit("")
+            .with_value_to_string(std::sync::Arc::new(max_cut_text))
+            .with_string_to_value(std::sync::Arc::new(|text| {
+                let text = text.trim();
+                if text.eq_ignore_ascii_case("off") {
+                    Some(MAX_CUT_OFF)
+                } else {
+                    text.trim_end_matches("dB")
+                        .trim()
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|v| v.is_finite() && (0.0..=MAX_CUT_OFF).contains(v))
+                }
+            })),
             link: FloatParam::new(
                 "Stereo link",
                 1.0,
@@ -259,6 +271,14 @@ fn multiplier_param(name: &'static str) -> FloatParam {
     FloatParam::new(name, 1.0, FloatRange::gain_range(-20.0, 20.0))
         .with_unit("x")
         .with_value_to_string(formatters::v2s_f32_rounded(2))
+}
+
+pub fn max_cut_text(value: f32) -> String {
+    if value >= MAX_CUT_OFF {
+        "Off".to_owned()
+    } else {
+        format!("{value:.2} dB")
+    }
 }
 
 pub fn set<P: Param>(setter: &ParamSetter, param: &P, value: P::Plain) {

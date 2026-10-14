@@ -55,6 +55,8 @@ under **Processing** to ensure it has loaded the update.
 The editor has a textured ivory surface, sage/clay controls, rotary knobs and a
 large spectrum display. **Depth**, **Detail**, **Attack** and **Release** use unitless 0–10
 controls; frequency tilts use 0.1×–10× multipliers, neutral 1×.
+**Maximum cut** limits reduction in dB; turn it fully clockwise to **Off** to
+remove that cap. Gentle start retains a 12 dB limit.
 The editor opens at 1152×768 and
 scales proportionally down to 960×640.
 

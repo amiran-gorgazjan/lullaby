@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub const BAND_COUNT: usize = 8;
+/// Host/JSON endpoint for disabling the maximum-reduction cap. Values below
+/// this endpoint remain finite dB limits; the endpoint itself is not a 24 dB cap.
+pub const MAX_CUT_OFF: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mode {
@@ -121,6 +124,7 @@ pub struct Settings {
     /// Unitless 0..10 onset/recovery controls; not milliseconds.
     pub attack: f32,
     pub release: f32,
+    /// 0..24: finite dB cap below 24; the 24 endpoint means Off (unlimited reduction).
     pub max_cut_db: f32,
     pub stereo_mode: StereoMode,
     pub link: f32,
@@ -188,7 +192,7 @@ impl Settings {
         self.detail = clamp(self.detail, 0.0, 10.0, 5.0);
         self.attack = clamp(self.attack, 0.0, 10.0, 5.0);
         self.release = clamp(self.release, 0.0, 10.0, 3.0);
-        self.max_cut_db = clamp(self.max_cut_db, 0.0, 36.0, 12.0);
+        self.max_cut_db = clamp(self.max_cut_db, 0.0, MAX_CUT_OFF, 12.0);
         self.link = clamp(self.link, 0.0, 1.0, 1.0);
         self.focus = clamp(self.focus, -1.0, 1.0, 0.0);
         for tilts in [
@@ -211,6 +215,17 @@ impl Settings {
         self.output_db = clamp(self.output_db, -24.0, 24.0, 0.0);
         self.listen_band = self.listen_band.clamp(-1, 7);
         self
+    }
+
+    /// Apply only an enabled cap. Off does not silently substitute a large
+    /// finite limit, and the stored endpoint stays finite for preset JSON.
+    pub fn limit_reduction(&self, reduction_db: f32) -> f32 {
+        let reduction_db = reduction_db.max(0.0);
+        if self.max_cut_db >= MAX_CUT_OFF {
+            reduction_db
+        } else {
+            reduction_db.min(self.max_cut_db)
+        }
     }
 
     pub fn weight(&self, frequency: f32, channel: usize) -> f32 {

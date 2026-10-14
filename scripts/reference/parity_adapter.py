@@ -168,12 +168,9 @@ def plan_case(record, lullaby_parameter_info):
             put("Output" if name == "Out trim" else name, _bounded(value, -24, 24))
         elif name == "Max cut":
             if str(value).strip().lower() == "off":
-                selector, candidate = put(name, 36)
-                issue(name, value, "missing_unlimited_cut",
-                      "Soothe3's unlimited reduction cannot be represented by Lullaby's finite 36 dB ceiling.",
-                      selector, candidate, frame)
+                put(name, 24, text="Off")
             else:
-                put(name, _bounded(value, 0, 36))
+                put(name, _bounded(value, 0, 24))
         elif name in ("Bypass", "Delta", "Sidechain", "Sidechain listen"):
             target = {"Sidechain": "External sidechain", "Sidechain listen": "Listen to sidechain"}.get(name, name)
             enabled = _on(value)

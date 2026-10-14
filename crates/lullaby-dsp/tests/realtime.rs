@@ -42,6 +42,11 @@ fn audio_and_automation_never_allocate_or_free() {
             settings.detail = ((i / 100) % 11) as f32;
             settings.attack = ((i / 100) % 11) as f32;
             settings.release = 10.0 - settings.attack;
+            settings.max_cut_db = if i % 200 == 0 {
+                lullaby_dsp::MAX_CUT_OFF
+            } else {
+                3.0
+            };
             settings.detail_tilt = if i % 200 == 0 {
                 [0.1, 10.0]
             } else {
@@ -58,7 +63,8 @@ fn audio_and_automation_never_allocate_or_free() {
             engine.set_settings(settings);
         }
         let value = (i as f32 * 0.21).sin() * 0.3;
-        let _ = engine.process_sample([value; 2], [value; 2]);
+        let output = engine.process_sample([value; 2], [value; 2]);
+        assert!(output.iter().all(|x| x.is_finite()));
     }
     engine.reset();
     TRACK.with(|c| c.set(false));

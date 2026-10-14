@@ -7,6 +7,35 @@ pub(crate) struct SpectralReference {
     reference: Vec<f32>,
 }
 
+impl SpectralReference {
+    pub fn new(bins: usize) -> Self {
+        Self {
+            power_sum: vec![0.0; bins + 1],
+            reference: vec![0.0; bins],
+        }
+    }
+
+    pub fn analyze(&mut self, db: &[f32], lower: &[usize], upper: &[usize]) -> &[f32] {
+        // Normalize before summing: subtraction of two large prefix sums must
+        // still resolve quiet neighborhoods, and a uniform input gain should
+        // not alter this relative detector.
+        let peak = db.iter().copied().fold(-150.0_f32, f32::max);
+        self.power_sum[0] = 0.0;
+        for (k, &level) in db.iter().enumerate() {
+            self.power_sum[k + 1] = self.power_sum[k] + 10.0_f64.powf((level - peak) as f64 * 0.1);
+        }
+        for k in 0..db.len() {
+            let lo = lower[k].min(k);
+            let hi = upper[k].max(k + 1).min(db.len());
+            let mean = (self.power_sum[hi] - self.power_sum[lo]) / (hi - lo) as f64;
+            // Global contrast calibration, independently chosen against the
+            // reviewed corpus; not a recovered proprietary envelope offset.
+            self.reference[k] = peak + (10.0 * mean.max(1e-15).log10()) as f32 - 2.0;
+        }
+        &self.reference
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SpectralReference;
@@ -54,34 +83,5 @@ mod tests {
         {
             assert!(((level - base) - (quiet - quiet_base)).abs() < 2e-5);
         }
-    }
-}
-
-impl SpectralReference {
-    pub fn new(bins: usize) -> Self {
-        Self {
-            power_sum: vec![0.0; bins + 1],
-            reference: vec![0.0; bins],
-        }
-    }
-
-    pub fn analyze(&mut self, db: &[f32], lower: &[usize], upper: &[usize]) -> &[f32] {
-        // Normalize before summing: subtraction of two large prefix sums must
-        // still resolve quiet neighborhoods, and a uniform input gain should
-        // not alter this relative detector.
-        let peak = db.iter().copied().fold(-150.0_f32, f32::max);
-        self.power_sum[0] = 0.0;
-        for (k, &level) in db.iter().enumerate() {
-            self.power_sum[k + 1] = self.power_sum[k] + 10.0_f64.powf((level - peak) as f64 * 0.1);
-        }
-        for k in 0..db.len() {
-            let lo = lower[k].min(k);
-            let hi = upper[k].max(k + 1).min(db.len());
-            let mean = (self.power_sum[hi] - self.power_sum[lo]) / (hi - lo) as f64;
-            // Global contrast calibration, independently chosen against the
-            // reviewed corpus; not a recovered proprietary envelope offset.
-            self.reference[k] = peak + (10.0 * mean.max(1e-15).log10()) as f32 - 2.0;
-        }
-        &self.reference
     }
 }

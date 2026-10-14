@@ -4,7 +4,7 @@ mod audio;
 #[path = "support/signals.rs"]
 mod signals;
 use audio::{Audio, VOCAL_BANDS, band_energy, energy, ratio_db, read_fixture, render};
-use lullaby_dsp::{Phase, Quality, Settings};
+use lullaby_dsp::{MAX_CUT_OFF, Phase, Quality, Settings};
 use signals::{musical_mix, peaking_eq};
 
 #[test]
@@ -261,7 +261,7 @@ fn pure_notes_and_a_boosted_fundamental_are_not_exempt() {
             &input,
             Settings {
                 depth: 10.0,
-                max_cut_db: 36.0,
+                max_cut_db: MAX_CUT_OFF,
                 ..Settings::default()
             },
         );
@@ -409,7 +409,7 @@ fn detail_controls_cut_concentration_on_close_tones() {
             Settings {
                 depth: 10.0,
                 detail,
-                max_cut_db: 36.0,
+                max_cut_db: MAX_CUT_OFF,
                 phase: Phase::Linear,
                 ..Settings::default()
             },

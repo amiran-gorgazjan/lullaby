@@ -1,6 +1,6 @@
 mod support;
 
-use lullaby_dsp::{Phase, Quality, factory_preset};
+use lullaby_dsp::{MAX_CUT_OFF, Phase, Quality, factory_preset};
 use support::{harmonic_fixture, harmonic_fixture_at, measure, noise_fixture};
 
 #[test]
@@ -102,7 +102,7 @@ fn depth_increases_suppression_progressively_instead_of_saturating_at_default() 
         let mut s = factory_preset(0);
         s.depth = depth;
         // Measure the depth law independently of the factory 12 dB ceiling.
-        s.max_cut_db = 36.0;
+        s.max_cut_db = MAX_CUT_OFF;
         s.phase = Phase::Linear;
         reductions.push(-measure(&signal, 48000.0, s).tones_db[3]);
     }

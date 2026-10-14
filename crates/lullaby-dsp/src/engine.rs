@@ -246,7 +246,7 @@ impl Engine {
             let detail = (s.detail / 10.0 + 0.5 * tilt(detail_tilt)).clamp(0.0, 1.0);
             // Independent smooth cut-envelope model. Low Detail produces
             // broader cuts; high Detail concentrates stronger cuts near peaks.
-            let spread_width = 0.16 + 0.6 * (1.0 - detail).powi(4);
+            let spread_width = 0.155 + 0.6 * (1.0 - detail).powi(4);
             let spread_extent = spread_width.exp2();
             self.spread_lower[k] = ((k as f32 / spread_extent).floor() as usize).max(1);
             self.spread_upper[k] =
@@ -261,6 +261,14 @@ impl Engine {
             }
             self.detail_strength[k] =
                 ((detail - 0.5) * if detail < 0.5 { 1.085 } else { 2.918 }).exp2();
+            // Independent Soft-mode sensitivity hypothesis from isolated
+            // equal-level tones: a broad presence emphasis, not a fixed audio
+            // EQ. It still acts only on detected contrast and active bins.
+            if s.mode == Mode::Soft {
+                let presence = (f / 2500.0).powi(4);
+                self.detail_strength[k] *=
+                    1.0 + presence / (1.0 + presence) / (1.0 + (f / 7000.0).powi(3));
+            }
             let extent = (1.25 - 0.5 * detail).exp2();
             self.reference_lower[k] = (k as f32 / extent).floor() as usize;
             self.reference_upper[k] = ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
@@ -273,6 +281,12 @@ impl Engine {
             // Detail tilt affects contrast selection as well as bandwidth.
             // Higher depth gradually admits less prominent spectral features.
             self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
+            // Low Depth excludes weaker contrast rather than merely scaling
+            // every detected feature down. Independent smooth calibration;
+            // At 10 the previous high-depth selection is unchanged.
+            if s.mode == Mode::Soft {
+                self.threshold[k] += 3.0 * (10.0 - s.depth) / (s.depth + 1.0);
+            }
             // Mild frequency-dependent response, independently tilted at either end.
             let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
             let coefficient = |seconds: f32, t: [f32; 2]| {
@@ -418,7 +432,7 @@ impl Engine {
         self.meter.peak_reduction_db = 0.0;
         for ch in &mut self.channels {
             let peak = ch.magnitude_db.iter().copied().fold(-150.0_f32, f32::max);
-            let floor = (peak - 60.0).max(-140.0);
+            let floor = (peak - if s.mode == Mode::Soft { 40.0 } else { 60.0 }).max(-140.0);
             let reference = ch.reference.analyze(
                 &ch.magnitude_db,
                 &self.reference_lower,
@@ -427,7 +441,15 @@ impl Engine {
             for (k, &baseline) in reference.iter().enumerate() {
                 let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0)
                     * self.contrast_scale[k];
-                let activity = ((ch.magnitude_db[k] - floor - 3.0) / 12.0).clamp(0.0, 1.0);
+                let activity = if s.mode == Mode::Soft {
+                    // Relative activity independently modeled from 20/40 dB
+                    // context probes. Hard retains its old safety floor and
+                    // separate absolute-level gate; these probes cover Soft.
+                    let x = ((ch.magnitude_db[k] - floor) / 32.0).clamp(0.0, 1.0);
+                    x * x * (3.0 - 2.0 * x)
+                } else {
+                    ((ch.magnitude_db[k] - floor - 3.0) / 12.0).clamp(0.0, 1.0)
+                };
                 let requested = match s.mode {
                     Mode::Soft => prominence * self.depth_amount,
                     Mode::Hard => {
@@ -458,15 +480,14 @@ impl Engine {
                 let target = if k == 0 {
                     0.0
                 } else {
-                    (spread * ch.weight[k]).min(s.max_cut_db)
+                    s.limit_reduction(spread * ch.weight[k])
                 };
                 let a = if target > ch.reduction[k] {
                     self.attack[k]
                 } else {
                     self.release[k]
                 };
-                ch.reduction[k] =
-                    (target + a * (ch.reduction[k] - target)).clamp(0.0, s.max_cut_db);
+                ch.reduction[k] = s.limit_reduction(target + a * (ch.reduction[k] - target));
                 self.meter.peak_reduction_db = self.meter.peak_reduction_db.max(ch.reduction[k]);
                 ch.filter[k] =
                     Complex32::new(-ch.reduction[k] * std::f32::consts::LN_10 / 20.0, 0.0);

@@ -166,13 +166,16 @@ explicit exploratory conversions where the current plugins do not share a
 calibrated control law. Depth, Detail, Attack and Release expose unitless 0–10
 scales. Frequency tilts display .1x–10x, neutral 1x. Their independently modeled
 strength, bandwidth, timing and frequency interpolation still have measurable error. Frequency tilts,
-band depth/Q and unlimited reduction must not be treated as equivalent merely
+band depth/Q must not be treated as equivalent merely
 because their names resemble each other. These exploratory renders help
 diagnose the current behavior, while their capability tests remain red until
 the feature/control contract is implemented and verified.
 
-In particular, Soothe3's unlimited maximum cut is currently represented only by
-an explicitly flagged finite Lullaby limit. Its 16-channel surround reference is
+Max cut uses finite dB limits below 24; the 24 endpoint displays **Off** and
+disables the reduction cap. The adapter sends Off directly and checks the 24
+plain-value readback; it no longer substitutes a finite 36 dB ceiling. This only
+establishes cap semantics, not the detector's agreement with the reference.
+The 16-channel surround reference is
 attempted unchanged and fails the current mono/stereo Lullaby bus negotiation.
 It stays a named failing primary test: it is never skipped, downmixed, or
 fabricated from stereo renders. Initial parameter readback can verify a chosen
@@ -251,3 +254,22 @@ values are not sound-preserving: zero clamps to .1x rather than neutral 1x.
 Review and re-save earlier presets. Factory timing choices were translated to
 roughly similar internal onset/recovery rates where explicit values existed;
 the gentle base now uses the new 5/3 defaults.
+
+Max cut's host range now spans 0–24 with the 24 endpoint meaning **Off**, rather
+than the previous 0–36 finite dB range. Its stable parameter ID remains, but old
+normalized state/automation now maps over 0–24 (an old 12 dB at one third becomes
+8 dB). The maximum normalized value now removes the cap. Direct JSON Settings
+uses the same finite 24 sentinel, so it remains serializable without Infinity;
+legacy values above 24 sanitize to Off. Factory presets retain their existing
+finite 3/6/8/9/12 dB caps. Review old states and user presets before release.
+
+Soft detection now uses a smooth, frequency-dependent sensitivity emphasis and
+a relative activity gate, informed by independent isolated/equal-amplitude/
+unequal-amplitude tone observations. Weak partials 40 dB below a dominant tone no
+longer receive the same suppression as a loud isolated high tone. Depth also
+changes contrast selection at low values instead of only scaling every cut.
+Hard retains its separate absolute-level gate. The common cut envelope is
+slightly narrower to preserve the existing locality guard. These are general
+independent models with measurable error, not recovered proprietary equations
+or a fixed equal-loudness EQ. The native Delta null and uncalibrated-scale
+failures remain the acceptance authority.

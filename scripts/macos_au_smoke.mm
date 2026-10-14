@@ -80,8 +80,8 @@ static std::map<std::string, AudioUnitParameterID> parameters(AudioUnit au) {
         }
         result[name] = id;
         if (std::string(name) == "Depth") {
-            require(info.minValue == 0 && info.maxValue == 1 && info.defaultValue == 0.25f,
-                    "Depth must retain CLAP normalized range/default");
+            require(info.minValue == 0 && info.maxValue == 1 && std::abs(info.defaultValue - 0.3f) < 1e-6f,
+                    "Depth must expose the current normalized range/default");
         }
     }
     return result;

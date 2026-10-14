@@ -320,16 +320,15 @@ fn timing_and_frequency_tilts_expose_unitless_controls_and_physical_multipliers(
 #[test]
 fn percentage_readouts_accept_display_units_and_escape_cancels_edits() {
     let mut test = Harness::new(theme::SIZE);
-    for (x, param) in [(1136.0, test.host.params.mix.as_ptr())] {
-        test.click(pos2(x, 877.0));
-        test.replace_text("25 %");
-        test.key(egui::Key::Enter);
-        assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
-        test.click(pos2(x, 877.0));
-        test.replace_text("90 %");
-        test.key(egui::Key::Escape);
-        assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
-    }
+    let param = test.host.params.mix.as_ptr();
+    test.click(pos2(1136.0, 877.0));
+    test.replace_text("25 %");
+    test.key(egui::Key::Enter);
+    assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
+    test.click(pos2(1136.0, 877.0));
+    test.replace_text("90 %");
+    test.key(egui::Key::Escape);
+    assert!((unsafe { param.unmodulated_normalized_value() } - 0.25).abs() < 0.001);
 }
 
 #[test]
@@ -381,4 +380,46 @@ fn detail_readout_accepts_unitless_zero_to_ten_values() {
     test.replace_text("7.5");
     test.key(egui::Key::Enter);
     assert!((test.host.params.detail.value() - 7.5).abs() < 0.001);
+}
+
+#[test]
+fn maximum_cut_endpoint_displays_off_and_accepts_text_and_finite_limits() {
+    let mut test = Harness::new(theme::SIZE);
+    let param = &test.host.params.max_cut_db;
+    assert_eq!(param.preview_plain(1.0), lullaby_dsp::MAX_CUT_OFF);
+    assert_eq!(param.normalized_value_to_string(1.0, true), "Off");
+    assert_eq!(param.normalized_value_to_string(0.5, true), "12.00 dB");
+    assert_eq!(param.string_to_normalized_value("Off"), Some(1.0));
+    assert_eq!(param.string_to_normalized_value("off"), Some(1.0));
+    assert_eq!(param.string_to_normalized_value("12 dB"), Some(0.5));
+    assert_eq!(param.string_to_normalized_value("36"), None);
+    assert_eq!(param.string_to_normalized_value("NaN"), None);
+    test.click(pos2(390.0, 877.0));
+    test.replace_text("Off");
+    test.key(egui::Key::Enter);
+    assert_eq!(
+        test.host.params.snapshot().max_cut_db,
+        lullaby_dsp::MAX_CUT_OFF
+    );
+    test.frame(
+        vec![Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        Modifiers::NONE,
+    );
+    test.click(pos2(390.0, 877.0));
+    test.replace_text("6 dB");
+    test.key(egui::Key::Enter);
+    assert_eq!(test.host.params.snapshot().max_cut_db, 6.0);
+    let s = Settings {
+        max_cut_db: lullaby_dsp::MAX_CUT_OFF,
+        ..Settings::default()
+    };
+    let setter = test.gui.param_setter();
+    test.host.params.apply(s, &setter);
+    assert_eq!(test.host.params.snapshot().max_cut_db, s.max_cut_db);
 }
