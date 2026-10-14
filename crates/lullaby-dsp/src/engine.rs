@@ -1,4 +1,4 @@
-use crate::detector::PeakReference;
+use crate::detector::SpectralReference;
 use crate::{Mode, Phase, Quality, Settings, StereoMode, db_to_gain, gain_to_db};
 use rustfft::{Fft, FftPlanner, num_complex::Complex32};
 use std::{f32::consts::PI, sync::Arc};
@@ -30,7 +30,7 @@ struct Channel {
     spectrum: Vec<Complex32>,
     detector: Vec<Complex32>,
     filter: Vec<Complex32>,
-    reference: PeakReference,
+    reference: SpectralReference,
     magnitude_db: Vec<f32>,
     reduction: Vec<f32>,
     weight: Vec<f32>,
@@ -46,7 +46,7 @@ impl Channel {
             spectrum: vec![Complex32::default(); n],
             detector: vec![Complex32::default(); n],
             filter: vec![Complex32::default(); n],
-            reference: PeakReference::new(n / 2 + 1),
+            reference: SpectralReference::new(n / 2 + 1),
             magnitude_db: vec![0.0; n / 2 + 1],
             reduction: vec![0.0; n / 2 + 1],
             weight: vec![0.0; n / 2 + 1],
@@ -88,7 +88,6 @@ pub struct Engine {
     release: Vec<f32>,
     reference_lower: Vec<usize>,
     reference_upper: Vec<usize>,
-    reference_guard: Vec<usize>,
     threshold: Vec<f32>,
     audition_mask: Vec<f32>,
     cached: Option<Settings>,
@@ -140,7 +139,6 @@ impl Engine {
             release: vec![0.0; n / 2 + 1],
             reference_lower: vec![0; n / 2 + 1],
             reference_upper: vec![0; n / 2 + 1],
-            reference_guard: vec![0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
             cached: None,
@@ -204,10 +202,8 @@ impl Engine {
             let extent = (1.25 - 0.5 * detail).exp2();
             self.reference_lower[k] = (k as f32 / extent).floor() as usize;
             self.reference_upper[k] = ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
-            self.reference_guard[k] = ((k as f32 * (0.3 - 0.25 * detail)).round() as usize).max(3);
-            // Detail tilt must affect detection selectivity as well as bandwidth.
-            // Higher depth gradually admits less prominent peaks, while the
-            // default leaves ordinary windowed sinusoidal lobes alone.
+            // Detail tilt affects contrast selection as well as bandwidth.
+            // Higher depth gradually admits less prominent spectral features.
             self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
             // Mild frequency-dependent response, independently tilted at either end.
             let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
@@ -356,7 +352,6 @@ impl Engine {
                 &ch.magnitude_db,
                 &self.reference_lower,
                 &self.reference_upper,
-                &self.reference_guard,
             );
             for (k, &baseline) in reference.iter().enumerate() {
                 let prominence = (ch.magnitude_db[k] - baseline - self.threshold[k]).max(0.0);
@@ -364,9 +359,12 @@ impl Engine {
                 let requested = match s.mode {
                     Mode::Soft => prominence * self.depth_amount,
                     Mode::Hard => {
+                        // Keep an absolute-level gate, with a progressive depth
+                        // law. These are independent calibration hypotheses,
+                        // not recovered Soothe3 equations.
                         prominence.min((ch.magnitude_db[k] + 24.0 + s.depth * 2.0).max(0.0))
-                            * s.depth
-                            * 0.2
+                            * self.depth_amount
+                            * (s.depth / 3.0).clamp(1.0, 4.0)
                     }
                 };
                 // Partially filled startup windows invent broad spectral

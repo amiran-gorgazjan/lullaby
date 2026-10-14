@@ -1,136 +1,87 @@
-/// Estimates a spectral envelope from independent neighboring peaks. A peak
-/// must not contribute to its own reference: that would make the reference
-/// follow a large resonance upward and hide it. Valleys are excluded too, so
-/// ordinary harmonic spacing is not mistaken for a series of resonances.
-pub(crate) struct PeakReference {
-    peaks: Vec<usize>,
-    peak_reference: Vec<f32>,
+/// Estimates a local spectral-power envelope. The candidate participates in
+/// the neighborhood average, so a lone sinusoid has finite contrast and a
+/// dense, flat spectrum has little contrast. Construction allocates the prefix
+/// buffer; analysis performs bounded linear work without allocation.
+pub(crate) struct SpectralReference {
+    power_sum: Vec<f64>,
     reference: Vec<f32>,
-    log_bin: Vec<f32>,
-    maxima: Vec<f32>,
-    leaves: usize,
 }
 
-impl PeakReference {
+#[cfg(test)]
+mod tests {
+    use super::SpectralReference;
+
+    #[test]
+    fn a_flat_spectrum_has_little_contrast_but_an_isolated_peak_has_bounded_contrast() {
+        let mut detector = SpectralReference::new(129);
+        let lower: Vec<_> = (0usize..129).map(|k| k.saturating_sub(16)).collect();
+        let upper: Vec<_> = (0usize..129).map(|k| (k + 17).min(129)).collect();
+        let mut db = vec![-30.0; 129];
+        let reference = detector.analyze(&db, &lower, &upper);
+        assert!(
+            db.iter()
+                .zip(reference)
+                .all(|(level, base)| (level - base).abs() < 3.0)
+        );
+
+        db.fill(-140.0);
+        db[64] = -20.0;
+        let first = db[64] - detector.analyze(&db, &lower, &upper)[64];
+        assert!(
+            (5.0..30.0).contains(&first),
+            "isolated-peak contrast: {first}"
+        );
+        // A stronger isolated tone should approach the same finite contrast;
+        // numerical valleys must not make the result unbounded.
+        db[64] = 0.0;
+        let stronger = db[64] - detector.analyze(&db, &lower, &upper)[64];
+        assert!((stronger - first).abs() < 0.01);
+    }
+
+    #[test]
+    fn relative_envelope_is_invariant_to_a_uniform_gain_change() {
+        let mut detector = SpectralReference::new(65);
+        let lower: Vec<_> = (0usize..65).map(|k| k.saturating_sub(8)).collect();
+        let upper: Vec<_> = (0usize..65).map(|k| (k + 9).min(65)).collect();
+        let db: Vec<_> = (0..65)
+            .map(|k| -20.0 - (k as f32 * 1.37).sin().abs() * 45.0)
+            .collect();
+        let first = detector.analyze(&db, &lower, &upper).to_vec();
+        let quieter: Vec<_> = db.iter().map(|level| level - 40.0).collect();
+        let second = detector.analyze(&quieter, &lower, &upper);
+        for ((level, quiet), (base, quiet_base)) in
+            db.iter().zip(&quieter).zip(first.iter().zip(second))
+        {
+            assert!(((level - base) - (quiet - quiet_base)).abs() < 2e-5);
+        }
+    }
+}
+
+impl SpectralReference {
     pub fn new(bins: usize) -> Self {
-        let leaves = bins.next_power_of_two();
         Self {
-            peaks: Vec::with_capacity(bins),
-            peak_reference: vec![0.0; bins],
+            power_sum: vec![0.0; bins + 1],
             reference: vec![0.0; bins],
-            log_bin: (0..bins).map(|k| (k.max(1) as f32).log2()).collect(),
-            maxima: vec![f32::NEG_INFINITY; 2 * leaves],
-            leaves,
         }
     }
 
-    pub fn analyze(
-        &mut self,
-        db: &[f32],
-        lower: &[usize],
-        upper: &[usize],
-        guard: &[usize],
-    ) -> &[f32] {
-        self.peaks.clear();
-        self.maxima[self.leaves..].fill(f32::NEG_INFINITY);
-        let floor = db.iter().copied().fold(-150.0_f32, f32::max) - 60.0;
-        for k in 1..db.len() - 1 {
-            if db[k] > db[k - 1] && db[k] >= db[k + 1] && db[k] > floor {
-                self.peaks.push(k);
-                self.maxima[self.leaves + k] = db[k];
-            }
+    pub fn analyze(&mut self, db: &[f32], lower: &[usize], upper: &[usize]) -> &[f32] {
+        // Normalize before summing: subtraction of two large prefix sums must
+        // still resolve quiet neighborhoods, and a uniform input gain should
+        // not alter this relative detector.
+        let peak = db.iter().copied().fold(-150.0_f32, f32::max);
+        self.power_sum[0] = 0.0;
+        for (k, &level) in db.iter().enumerate() {
+            self.power_sum[k + 1] = self.power_sum[k] + 10.0_f64.powf((level - peak) as f64 * 0.1);
         }
-        // A lone sinusoid has no independent spectral context. Do not label
-        // its window leakage as a set of quieter musical neighbors.
-        if self.peaks.len() < 2 {
-            self.reference.copy_from_slice(db);
-            return &self.reference;
+        for k in 0..db.len() {
+            let lo = lower[k].min(k);
+            let hi = upper[k].max(k + 1).min(db.len());
+            let mean = (self.power_sum[hi] - self.power_sum[lo]) / (hi - lo) as f64;
+            // Global contrast calibration, independently chosen against the
+            // reviewed corpus; not a recovered proprietary envelope offset.
+            self.reference[k] = peak + (10.0 * mean.max(1e-15).log10()) as f32 - 2.0;
         }
-        for i in (1..self.leaves).rev() {
-            self.maxima[i] = self.maxima[2 * i].max(self.maxima[2 * i + 1]);
-        }
-        for &k in &self.peaks {
-            // Exclude the entire candidate resonance region, not just its
-            // winning bin: an EQ bump may lift several adjacent partials.
-            // Detail controls its width, with a main-lobe-size minimum.
-            // A segment tree keeps queries O(log FFT size), even
-            // on dense/noisy spectra and at the highest overlap setting.
-            let left = self.maximum(lower[k], k.saturating_sub(guard[k]));
-            let right = self.maximum(k + guard[k] + 1, upper[k]);
-            let reference = left.max(right);
-            self.peak_reference[k] = if reference.is_finite() {
-                reference
-            } else {
-                db[k]
-            };
-        }
-        // A musical fundamental can naturally exceed its upper partials. Use
-        // their envelope with a conservative 1/h amplitude rolloff allowance.
-        // This reference still excludes the fundamental's own level, so an
-        // artificially boosted fundamental remains detectable. Search upward
-        // so a loud upper harmonic cannot claim to be the foundation.
-        for &k in &self.peaks {
-            if db[k] < floor + 20.0
-                || self.maximum(k.saturating_sub(4), (k + 5).min(db.len())) > db[k]
-            {
-                continue;
-            }
-            let mut support = 0;
-            let mut foundation = f32::NEG_INFINITY;
-            for h in 2..=6 {
-                let center = k * h;
-                if center + 2 < db.len() {
-                    let partial = self.maximum(center.saturating_sub(2), center + 3);
-                    if partial > db[k] - 24.0 {
-                        support += 1;
-                        foundation = foundation.max(partial + 20.0 * (h as f32).log10());
-                    }
-                }
-            }
-            if support >= 2 {
-                self.peak_reference[k] = self.peak_reference[k].max(foundation);
-                break;
-            }
-        }
-        let first = self.peaks[0];
-        let last = *self.peaks.last().unwrap();
-        self.reference[..first].fill(self.peak_reference[first]);
-        self.reference[last..].fill(self.peak_reference[last]);
-        for pair in self.peaks.windows(2) {
-            let [left, right] = [pair[0], pair[1]];
-            for k in left..right {
-                let mix = (self.log_bin[k] - self.log_bin[left])
-                    / (self.log_bin[right] - self.log_bin[left]);
-                self.reference[k] = self.peak_reference[left]
-                    + mix * (self.peak_reference[right] - self.peak_reference[left]);
-            }
-        }
-        // These bins do not have room for an independent main lobe below them.
-        // Especially at low latency/high sample rates, unresolved bass must
-        // not be diagnosed from distant, much quieter upper harmonics.
-        self.reference[..4].copy_from_slice(&db[..4]);
         &self.reference
-    }
-
-    /// Maximum over the half-open range. Empty ranges have no reference peak.
-    fn maximum(&self, lo: usize, hi: usize) -> f32 {
-        if lo >= hi {
-            return f32::NEG_INFINITY;
-        }
-        let (mut lo, mut hi) = (lo + self.leaves, hi + self.leaves);
-        let mut result = f32::NEG_INFINITY;
-        while lo < hi {
-            if lo % 2 == 1 {
-                result = result.max(self.maxima[lo]);
-                lo += 1;
-            }
-            if hi % 2 == 1 {
-                hi -= 1;
-                result = result.max(self.maxima[hi]);
-            }
-            lo /= 2;
-            hi /= 2;
-        }
-        result
     }
 }
