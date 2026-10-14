@@ -275,20 +275,46 @@ fn rotary_drag_keeps_coalesced_release_motion_and_balances_host_gestures() {
 fn rotary_fine_drag_and_typed_values_use_the_existing_parameter_ranges() {
     let mut test = Harness::new(theme::SIZE);
     let start = pos2(671.0, 781.0);
-    let initial = test.host.params.attack_ms.unmodulated_normalized_value();
+    let initial = test.host.params.attack.unmodulated_normalized_value();
     test.pointer(start, true, Modifiers::SHIFT);
     test.pointer(start - Vec2::new(0.0, 60.0), false, Modifiers::SHIFT);
     assert!(
-        (test.host.params.attack_ms.unmodulated_normalized_value() - initial - 0.03).abs() < 0.001,
+        (test.host.params.attack.unmodulated_normalized_value() - initial - 0.03).abs() < 0.001,
         "attack={}, initial={initial}, events={:?}",
-        test.host.params.attack_ms.unmodulated_normalized_value(),
+        test.host.params.attack.unmodulated_normalized_value(),
         test.host.events.lock().unwrap()
     );
-    // Direct entry retains the host's plain milliseconds, despite the skewed knob range.
+    // Direct entry uses the same unitless 0..10 control shown by the host.
     test.click(pos2(671.0, 877.0));
-    test.replace_text("37 ms");
+    test.replace_text("7.0");
     test.key(egui::Key::Enter);
-    assert!((test.host.params.attack_ms.value() - 37.0).abs() < 0.001);
+    assert!((test.host.params.attack.value() - 7.0).abs() < 0.001);
+}
+
+#[test]
+fn timing_and_frequency_tilts_expose_unitless_controls_and_physical_multipliers() {
+    let params = LullabyParams::default();
+    for (param, default) in [(&params.attack, 5.0), (&params.release, 3.0)] {
+        assert_eq!(param.unit(), "");
+        assert_eq!(param.value(), default);
+        assert_eq!(param.preview_plain(0.0), 0.0);
+        assert_eq!(param.preview_plain(1.0), 10.0);
+    }
+    for param in [
+        &params.detail_low,
+        &params.detail_high,
+        &params.attack_low,
+        &params.attack_high,
+        &params.release_low,
+        &params.release_high,
+    ] {
+        assert_eq!(param.unit(), "x");
+        assert_eq!(param.value(), 1.0);
+        assert!((param.preview_plain(0.0) - 0.1).abs() < 1e-6);
+        assert!((param.preview_plain(0.5) - 1.0).abs() < 1e-6);
+        assert!((param.preview_plain(1.0) - 10.0).abs() < 1e-6);
+        assert!(param.normalized_value_to_string(0.5, true).ends_with('x'));
+    }
 }
 
 #[test]

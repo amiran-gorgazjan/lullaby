@@ -118,12 +118,15 @@ pub struct Settings {
     /// Unitless 0..10 cut concentration: higher values select narrower, stronger cuts.
     /// This independently calibrated law is not a filter Q or bandwidth in Hz.
     pub detail: f32,
-    pub attack_ms: f32,
-    pub release_ms: f32,
+    /// Unitless 0..10 onset/recovery controls; not milliseconds.
+    pub attack: f32,
+    pub release: f32,
     pub max_cut_db: f32,
     pub stereo_mode: StereoMode,
     pub link: f32,
     pub focus: f32,
+    /// Low/high displayed multipliers (.1x..10x), neutral 1x. Their frequency
+    /// interpolation and effect on Detail are independently modeled.
     pub detail_tilt: [f32; 2],
     pub attack_tilt: [f32; 2],
     pub release_tilt: [f32; 2],
@@ -147,15 +150,15 @@ impl Default for Settings {
             mode: Mode::Soft,
             depth: 3.0,
             detail: 5.0,
-            attack_ms: 10.0,
-            release_ms: 120.0,
+            attack: 5.0,
+            release: 3.0,
             max_cut_db: 12.0,
             stereo_mode: StereoMode::LeftRight,
             link: 1.0,
             focus: 0.0,
-            detail_tilt: [0.0; 2],
-            attack_tilt: [0.0; 2],
-            release_tilt: [0.0; 2],
+            detail_tilt: [1.0; 2],
+            attack_tilt: [1.0; 2],
+            release_tilt: [1.0; 2],
             bands: [Band::default(); BAND_COUNT],
             mix: 1.0,
             wet_trim_db: 0.0,
@@ -183,8 +186,8 @@ impl Settings {
         }
         self.depth = clamp(self.depth, 0.0, 10.0, 3.0);
         self.detail = clamp(self.detail, 0.0, 10.0, 5.0);
-        self.attack_ms = clamp(self.attack_ms, 0.1, 500.0, 10.0);
-        self.release_ms = clamp(self.release_ms, 5.0, 2000.0, 120.0);
+        self.attack = clamp(self.attack, 0.0, 10.0, 5.0);
+        self.release = clamp(self.release, 0.0, 10.0, 3.0);
         self.max_cut_db = clamp(self.max_cut_db, 0.0, 36.0, 12.0);
         self.link = clamp(self.link, 0.0, 1.0, 1.0);
         self.focus = clamp(self.focus, -1.0, 1.0, 0.0);
@@ -194,7 +197,7 @@ impl Settings {
             &mut self.release_tilt,
         ] {
             for v in tilts {
-                *v = clamp(*v, -1.0, 1.0, 0.0);
+                *v = clamp(*v, 0.1, 10.0, 1.0);
             }
         }
         for band in &mut self.bands {
@@ -270,19 +273,19 @@ pub fn factory_preset(index: usize) -> Settings {
         }
         2 => {
             s.bands[0] = Band::bell(7000.0, 9.0, 2.0);
-            s.attack_ms = 2.0;
-            s.release_ms = 80.0;
+            s.attack = 3.5;
+            s.release = 4.6;
         }
         3 => {
             s.bands[0] = Band::bell(300.0, 9.0, 1.5);
-            s.attack_ms = 35.0;
+            s.attack = 6.9;
             s.max_cut_db = 6.0;
         }
         4 => {
             s.depth = 3.0;
             s.max_cut_db = 3.0;
             s.stereo_mode = StereoMode::MidSide;
-            s.attack_ms = 30.0;
+            s.attack = 6.7;
         }
         5 => {
             s.external_sidechain = true;

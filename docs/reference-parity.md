@@ -163,8 +163,9 @@ is used; it is an observation for these captures, not a claim about all settings
 
 [`parity_adapter.py`](../scripts/reference/parity_adapter.py) records fixed,
 explicit exploratory conversions where the current plugins do not share a
-calibrated control law. Depth and Detail now expose unitless 0–10 scales; their independently calibrated
-strength/bandwidth laws still have measurable error. Unitless timing controls, frequency tilts,
+calibrated control law. Depth, Detail, Attack and Release expose unitless 0–10
+scales. Frequency tilts display .1x–10x, neutral 1x. Their independently modeled
+strength, bandwidth, timing and frequency interpolation still have measurable error. Frequency tilts,
 band depth/Q and unlimited reduction must not be treated as equivalent merely
 because their names resemble each other. These exploratory renders help
 diagnose the current behavior, while their capability tests remain red until
@@ -223,3 +224,30 @@ normalized positions retain their new displayed counterparts (old 0.5 becomes 5)
 but its processing law has changed. Direct JSON `Settings` uses displayed units;
 old Detail 0.5 means 0.5 now, and old Depth values above 10 clamp to 10. Existing
 user presets should be reviewed and re-saved rather than assumed equivalent.
+
+Attack and Release now also display **0–10**, rather than milliseconds. Defaults
+are Attack 5 and Release 3. These are unitless onset/recovery controls; the retained
+internal one-pole law remains exploratory. Independent licensed key-tone probes
+showed that matching apparent isolated-tail time constants alone **worsened** the
+full-corpus Delta null. Their delayed recovery also varied with frequency; no
+fixed native hold timer or exact detector architecture was established. Rejected
+constant/hold experiments are documented in the local sequential-agent memories.
+
+Low/high Detail, Attack and Release tilts display **.1x–10x**, neutral 1x, with
+gradual frequency weighting below 500 Hz and above 2 kHz. Temporal tilts now apply
+the displayed multiplier to the internal time scale, interpolated in logarithmic
+space across those regions. Detail retains its independently modeled logarithmic
+offset to cut concentration; its displayed multiplier does not prove a literal
+same-factor multiplication of the Detail control or equivalence to the reference.
+All uncalibrated-control capability failures remain explicit.
+
+The old VST IDs `attack_ms`/`release_ms` are deliberately retained so automation
+lanes remain addressable, but their normalized positions now map linearly to
+unitless 0–10. Tilt IDs also remain; their ranges now expose positive multipliers
+with 1x at the center. Earlier projects will sound different. Direct JSON settings
+now use `attack`/`release`; old `attack_ms`/`release_ms` fields are not converted
+and fall back to defaults when loading an old partial preset. Old signed tilt
+values are not sound-preserving: zero clamps to .1x rather than neutral 1x.
+Review and re-save earlier presets. Factory timing choices were translated to
+roughly similar internal onset/recovery rates where explicit values existed;
+the gentle base now uses the new 5/3 defaults.

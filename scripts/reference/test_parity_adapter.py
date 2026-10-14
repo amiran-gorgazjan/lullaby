@@ -1,5 +1,4 @@
 """Adapter regressions use invented inventories, never proprietary binaries/audio."""
-import math
 import unittest
 
 try:
@@ -13,9 +12,9 @@ except ImportError:
 def inventory():
     """Public parameter metadata matching the checked-in Lullaby declaration."""
     controls = [
-        ("Depth", 0, 10), ("Detail", 0, 10), ("Attack", .1, 500), ("Release", 5, 2000),
+        ("Depth", 0, 10), ("Detail", 0, 10), ("Attack", 0, 10), ("Release", 0, 10),
         ("Max cut", 0, 36), ("Stereo link", 0, 1), ("Stereo focus", -1, 1),
-        *[(f"{control} / {side}", -1, 1) for control in ("Detail", "Attack", "Release")
+        *[(f"{control} / {side}", .1, 10) for control in ("Detail", "Attack", "Release")
           for side in ("low", "high")],
         ("Mix", 0, 1), ("Wet trim", -24, 24), ("Output", -24, 24),
         ("Bypass", 0, 1), ("Delta", 0, 1), ("External sidechain", 0, 1),
@@ -51,8 +50,8 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(issues[title]["code"], "uncalibrated_scale")
             self.assertIn("exploratory_value", issues[title])
         self.assertEqual(result["expected_parameters"]["Detail"]["plain"], 5)
-        self.assertAlmostEqual(result["expected_parameters"]["Attack"]["plain"], math.sqrt(.1 * 500))
-        self.assertNotEqual(result["expected_parameters"]["Release"]["plain"], 3)
+        self.assertAlmostEqual(result["expected_parameters"]["Attack"]["plain"], 5)
+        self.assertEqual(result["expected_parameters"]["Release"]["plain"], 3)
 
     def test_duplicate_band_names_select_the_requested_native_ids(self):
         result = self.plan({"Band 4 used": "on", "Band 4 enabled": "on", "Band 4 shape": "Bell",
@@ -67,6 +66,19 @@ class AdapterTests(unittest.TestCase):
         source_issues = {p["source_parameter"] for p in result["unsupported"]}
         self.assertIn("Band 4 depth", source_issues)
         self.assertIn("Band 4 q", source_issues)
+
+    def test_frequency_tilts_keep_physical_multipliers_and_semantic_failures(self):
+        result = self.plan({"Attack tilt low": ".1x", "Release tilt high": "10x"})
+        self.assertEqual(result["host_settings"]["Attack / low"], "0.1")
+        self.assertEqual(result["host_settings"]["Release / high"], "10")
+        self.assertEqual(result["host_settings"]["Detail / low"], "1")
+        issues = {issue["source_parameter"]: issue for issue in result["unsupported"]}
+        self.assertEqual(issues["Attack tilt low"]["code"], "uncalibrated_tilt")
+        self.assertEqual(issues["Release tilt high"]["code"], "uncalibrated_tilt")
+        for invalid in ("0", "10.1", "nan"):
+            issue = self.plan({"Attack tilt high": invalid})["unsupported"]
+            self.assertTrue(any(row["source_parameter"] == "Attack tilt high" and
+                                row["code"] == "unmappable_control" for row in issue))
 
     def test_shape_automation_uses_lullaby_enum_order_and_preserves_frames(self):
         case = plan.build()[11]

@@ -244,7 +244,7 @@ fn mid_side_can_leave_mid_untouched() {
 fn silence_and_nonfinite_values_remain_finite() {
     let s = Settings {
         depth: f32::NAN,
-        attack_ms: f32::NEG_INFINITY,
+        attack: f32::NEG_INFINITY,
         ..Settings::default()
     };
     let (out, _) = render(
@@ -306,7 +306,105 @@ fn presets_round_trip_and_partial_presets_use_defaults() {
     }
     let s: Settings = serde_json::from_str(r#"{"depth": 3.0}"#).unwrap();
     assert_eq!(s.depth, 3.0);
-    assert_eq!(s.release_ms, 120.0);
+    assert_eq!(s.release, 3.0);
+}
+
+#[test]
+fn temporal_controls_and_tilt_multipliers_have_explicit_ranges_and_defaults() {
+    let s = Settings::default();
+    assert_eq!((s.attack, s.release), (5.0, 3.0));
+    assert_eq!(s.detail_tilt, [1.0; 2]);
+    assert_eq!(s.attack_tilt, [1.0; 2]);
+    assert_eq!(s.release_tilt, [1.0; 2]);
+    let s = Settings {
+        attack: -1.0,
+        release: 12.0,
+        detail_tilt: [0.0, 100.0],
+        attack_tilt: [f32::NAN, f32::INFINITY],
+        release_tilt: [0.1, 10.0],
+        ..s
+    }
+    .sanitized();
+    assert_eq!((s.attack, s.release), (0.0, 10.0));
+    assert_eq!(s.detail_tilt, [0.1, 10.0]);
+    assert_eq!(s.attack_tilt, [1.0; 2]);
+    assert_eq!(s.release_tilt, [0.1, 10.0]);
+    let s = Settings {
+        attack: f32::NAN,
+        release: f32::NEG_INFINITY,
+        ..s
+    }
+    .sanitized();
+    assert_eq!((s.attack, s.release), (5.0, 3.0));
+    let json = serde_json::to_value(s).unwrap();
+    assert!(json.get("attack").is_some());
+    assert!(json.get("release").is_some());
+    assert!(json.get("attack_ms").is_none());
+    assert!(json.get("release_ms").is_none());
+}
+
+fn keyed_sine_level(settings: Settings, frequency: f32, start: f32, end: f32) -> f32 {
+    let tone = |i: usize| [0.15 * (TAU * frequency * i as f32 / 48000.0).sin(); 2];
+    let key = |i: usize| {
+        if (48000..96000).contains(&i) {
+            tone(i)
+        } else {
+            [0.0; 2]
+        }
+    };
+    let (audio, engine) = render(settings, 144000, tone, key);
+    let a = (start * 48000.0) as usize + engine.latency_samples();
+    let b = (end * 48000.0) as usize + engine.latency_samples();
+    gain_to_db(rms(&audio[a..b], 0) / (0.15 / 2.0_f32.sqrt()))
+}
+
+#[test]
+fn higher_unitless_attack_delays_onset_and_release_extends_recovery() {
+    let fast = Settings {
+        depth: 10.0,
+        attack: 0.0,
+        release: 0.0,
+        external_sidechain: true,
+        ..Settings::default()
+    };
+    let slow_attack = Settings {
+        attack: 10.0,
+        ..fast
+    };
+    let a = keyed_sine_level(fast, 1056.0, 1.08, 1.18);
+    let b = keyed_sine_level(slow_attack, 1056.0, 1.08, 1.18);
+    assert!(a < -3.0 && b > a + 2.0, "attack fast={a}, slow={b}");
+    let slow_release = Settings {
+        release: 10.0,
+        ..fast
+    };
+    let a = keyed_sine_level(fast, 1056.0, 2.15, 2.25);
+    let b = keyed_sine_level(slow_release, 1056.0, 2.15, 2.25);
+    assert!(a > -0.1 && b < a - 2.0, "release fast={a}, slow={b}");
+}
+
+#[test]
+fn temporal_tilt_multipliers_slow_low_and_high_frequency_onsets() {
+    let neutral = Settings {
+        depth: 10.0,
+        attack: 5.0,
+        release: 0.0,
+        external_sidechain: true,
+        ..Settings::default()
+    };
+    for (frequency, tilts) in [(120.0, [10.0, 1.0]), (6000.0, [1.0, 10.0])] {
+        let a = keyed_sine_level(neutral, frequency, 1.04, 1.09);
+        let b = keyed_sine_level(
+            Settings {
+                attack_tilt: tilts,
+                ..neutral
+            },
+            frequency,
+            1.04,
+            1.09,
+        );
+        assert!(b > a + 0.5, "{frequency}Hz neutral={a}, slowed={b}");
+    }
 }
 
 #[test]

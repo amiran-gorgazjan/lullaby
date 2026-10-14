@@ -145,6 +145,7 @@ impl LullabyEditor {
                     toggle(ui, &params.external_sidechain, setter, "External sidechain");
                     toggle(ui, &params.sidechain_listen, setter, "Listen to sidechain");
                     ui.collapsing("Frequency tilts", |ui| {
+                        ui.label("Low: below 500 Hz · High: above 2 kHz · Neutral: 1x");
                         for param in [
                             &params.detail_low,
                             &params.detail_high,

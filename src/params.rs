@@ -8,9 +8,9 @@ pub struct LullabyParams {
     #[id = "detail"]
     pub detail: FloatParam,
     #[id = "attack_ms"]
-    pub attack_ms: FloatParam,
+    pub attack: FloatParam,
     #[id = "release_ms"]
-    pub release_ms: FloatParam,
+    pub release: FloatParam,
     #[id = "max_cut_db"]
     pub max_cut_db: FloatParam,
     #[id = "link"]
@@ -80,27 +80,25 @@ impl Default for LullabyParams {
             )
             .with_unit("")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            attack_ms: FloatParam::new(
+            attack: FloatParam::new(
                 "Attack",
-                10.0,
-                FloatRange::Skewed {
-                    min: 0.1,
-                    max: 500.0,
-                    factor: FloatRange::skew_factor(-2.0),
+                5.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
                 },
             )
-            .with_unit(" ms")
+            .with_unit("")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            release_ms: FloatParam::new(
+            release: FloatParam::new(
                 "Release",
-                120.0,
-                FloatRange::Skewed {
-                    min: 5.0,
-                    max: 2000.0,
-                    factor: FloatRange::skew_factor(-2.0),
+                3.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 10.0,
                 },
             )
-            .with_unit(" ms")
+            .with_unit("")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
             max_cut_db: FloatParam::new(
                 "Max cut",
@@ -129,66 +127,12 @@ impl Default for LullabyParams {
             )
             .with_unit("")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            detail_low: FloatParam::new(
-                "Detail / low",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            detail_high: FloatParam::new(
-                "Detail / high",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            attack_low: FloatParam::new(
-                "Attack / low",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            attack_high: FloatParam::new(
-                "Attack / high",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            release_low: FloatParam::new(
-                "Release / low",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
-            release_high: FloatParam::new(
-                "Release / high",
-                0.0,
-                FloatRange::Linear {
-                    min: -1.0,
-                    max: 1.0,
-                },
-            )
-            .with_unit("")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            detail_low: multiplier_param("Detail / low"),
+            detail_high: multiplier_param("Detail / high"),
+            attack_low: multiplier_param("Attack / low"),
+            attack_high: multiplier_param("Attack / high"),
+            release_low: multiplier_param("Release / low"),
+            release_high: multiplier_param("Release / high"),
             mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit("")
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
@@ -245,8 +189,8 @@ impl LullabyParams {
         Settings {
             depth: self.depth.value(),
             detail: self.detail.value(),
-            attack_ms: self.attack_ms.value(),
-            release_ms: self.release_ms.value(),
+            attack: self.attack.value(),
+            release: self.release.value(),
             max_cut_db: self.max_cut_db.value(),
             link: self.link.value(),
             focus: self.focus.value(),
@@ -279,8 +223,8 @@ impl LullabyParams {
         let s = s.sanitized();
         set(setter, &self.depth, s.depth);
         set(setter, &self.detail, s.detail);
-        set(setter, &self.attack_ms, s.attack_ms);
-        set(setter, &self.release_ms, s.release_ms);
+        set(setter, &self.attack, s.attack);
+        set(setter, &self.release, s.release);
         set(setter, &self.max_cut_db, s.max_cut_db);
         set(setter, &self.link, s.link);
         set(setter, &self.focus, s.focus);
@@ -306,6 +250,15 @@ impl LullabyParams {
             p.apply(band, setter);
         }
     }
+}
+
+// Positive multipliers, with neutral 1x at the center of the knob. This
+// distribution approximates a logarithmic gesture; it does not claim native
+// normalized-position equivalence. The host's plain value is the multiplier.
+fn multiplier_param(name: &'static str) -> FloatParam {
+    FloatParam::new(name, 1.0, FloatRange::gain_range(-20.0, 20.0))
+        .with_unit("x")
+        .with_value_to_string(formatters::v2s_f32_rounded(2))
 }
 
 pub fn set<P: Param>(setter: &ParamSetter, param: &P, value: P::Plain) {

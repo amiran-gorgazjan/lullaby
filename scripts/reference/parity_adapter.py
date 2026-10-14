@@ -159,12 +159,9 @@ def plan_case(record, lullaby_parameter_info):
             uncalibrated("Detail", _bounded(value, 0, 10),
                          "Both Detail controls use 0..10; bandwidth and detector strength remain approximate.")
         elif name in ("Attack", "Release"):
-            bounds = (.1, 500) if name == "Attack" else (5, 2000)
-            candidate = bounds[0] * (bounds[1] / bounds[0]) ** (_bounded(value, 0, 10) / 10)
-            uncalibrated(name, candidate,
-                         "Soothe3 uses a unitless 0..10 control; Lullaby uses milliseconds. "
-                         "Candidate uses a fixed logarithmic interpolation across Lullaby's range; "
-                         "this is not a measured timing equivalence.")
+            uncalibrated(name, _bounded(value, 0, 10),
+                         "Both timing controls use unitless 0..10; Lullaby's independently calibrated "
+                         "envelope law remains approximate, not a measured timing equivalence.")
         elif name in ("Mix", "Stereo link"):
             put(name, _bounded(value, 0, 100) / 100)
         elif name in ("Wet trim", "Out trim"):
@@ -206,11 +203,11 @@ def plan_case(record, lullaby_parameter_info):
         elif re.fullmatch(r"(Detail|Attack|Release) tilt (low|high)", name):
             control, _, side = name.split()
             multiplier = _bounded(value, .1, 10)
-            selector, candidate = put(f"{control} / {side}", math.log10(multiplier))
+            selector, candidate = put(f"{control} / {side}", multiplier)
             if multiplier != 1:
                 issue(name, value, "uncalibrated_tilt",
-                      "Soothe3 frequency multipliers and Lullaby additive/exponential tilts differ; "
-                      "candidate uses fixed log10(multiplier).", selector, candidate, frame)
+                      "Both tilts display physical multipliers; frequency interpolation and DSP semantics remain approximate; "
+                      "candidate uses the same displayed multiplier.", selector, candidate, frame)
         elif (match := re.fullmatch(r"Band ([1-8]) (.+)", name)):
             band, control = int(match.group(1)), match.group(2)
             if control in ("used", "enabled"):

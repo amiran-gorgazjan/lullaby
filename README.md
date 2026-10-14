@@ -52,15 +52,16 @@ Existing presets and sessions load, but their processing will sound different.
 After replacing the installed bundle, restart your DAW and check the version
 under **Processing** to ensure it has loaded the update.
 
-The editor follows `ui_reference.png` with a textured ivory surface, sage/clay
-controls, sculpted rotary knobs and a large spectrum display. This is a visual
-redesign: the engine, 73 host parameters, preset format and ranges are unchanged.
-**Sharpness** is the existing **Detail** parameter displayed as a percentage;
-**Maximum cut** retains its existing function. The editor opens at 1152×768 and
+The editor has a textured ivory surface, sage/clay controls, rotary knobs and a
+large spectrum display. **Depth**, **Detail**, **Attack** and **Release** use unitless 0–10
+controls; frequency tilts use 0.1×–10× multipliers, neutral 1×.
+The editor opens at 1152×768 and
 scales proportionally down to 960×640.
 
 1. Start with **Gentle start**. Raise **Depth**, then back it off until reduction
-   is subtle. **Sharpness** controls the local spectral neighborhood used to find peaks.
+   is subtle. Higher **Detail** concentrates stronger cuts around peaks.
+   **Attack** controls onset and **Release** controls recovery; higher values
+   respond more slowly. They do not display physical milliseconds.
 2. Double-click the graph to add a weighting band; drag its node to change
    frequency and emphasis. Scroll over it to change width. Select a numbered
    band in **Spectral bands** in the footer to edit its shape, focus or enabled state.
@@ -68,7 +69,7 @@ scales proportionally down to 960×640.
    A bell increases or decreases sensitivity locally; a flat curve still permits
    processing elsewhere. Use the cut or pass-band shapes to restrict the range.
 3. **Delta** auditions what the filter removes. **Audition Δ** narrows this to
-   the selected band. Both are measured before wet trim, mix and output gain.
+   the selected band. Global Delta follows Mix, Wet trim and Output gain.
 4. Open **Processing** for mode, channels, quality, phase, wet trim, sidechain,
    frequency tilts and continuous stereo link/focus. **Link** blends independent and shared detection. **Focus** moves processing
    toward left/mid (−1) or right/side (+1). Use **M/S** for stereo material.
@@ -80,7 +81,7 @@ scales proportionally down to 960×640.
 Drag knobs vertically or horizontally; hold Shift for fine changes. Scroll or use
 arrow keys on a focused knob, double-click (or Ctrl/Cmd-click) to reset, and click
 a value to type it. Enter or clicking away applies an entry; Escape cancels it.
-Sharpness and Mix entries use percentages, matching their readouts.
+Mix entries use percentages, matching their readout.
 
 The graph shows the detector spectrum, average suppression and an estimated
 filtered spectrum. The latter reflects displayed reduction, including Mix, but

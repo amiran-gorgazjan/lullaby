@@ -231,12 +231,19 @@ impl Engine {
         let detail_changed = self
             .cached
             .is_none_or(|old| old.detail != s.detail || old.detail_tilt != s.detail_tilt);
+        let detail_tilt = s.detail_tilt.map(f32::log10);
+        let attack_tilt = s.attack_tilt.map(f32::log10);
+        let release_tilt = s.release_tilt.map(f32::log10);
+        // Independent render law, retained after the closer isolated-key
+        // time-constant hypothesis worsened the phase-sensitive corpus score.
+        let attack_seconds = 0.0001 * 5000.0_f32.powf(s.attack / 10.0);
+        let release_seconds = 0.005 * 400.0_f32.powf(s.release / 10.0);
         for k in 0..=self.n / 2 {
             let f = (k as f32 * self.sample_rate / self.n as f32).max(20.0);
             let low = 1.0 / (1.0 + (f / 500.0).powi(2));
             let high = 1.0 / (1.0 + (2000.0 / f).powi(2));
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
-            let detail = (s.detail / 10.0 + 0.5 * tilt(s.detail_tilt)).clamp(0.0, 1.0);
+            let detail = (s.detail / 10.0 + 0.5 * tilt(detail_tilt)).clamp(0.0, 1.0);
             // Independent smooth cut-envelope model. Low Detail produces
             // broader cuts; high Detail concentrates stronger cuts near peaks.
             let spread_width = 0.16 + 0.6 * (1.0 - detail).powi(4);
@@ -268,12 +275,12 @@ impl Engine {
             self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
             // Mild frequency-dependent response, independently tilted at either end.
             let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
-            let coefficient = |ms: f32, t: [f32; 2]| {
-                let seconds = (ms * 0.001 * frequency_scale * 4.0_f32.powf(tilt(t))).max(0.0001);
+            let coefficient = |seconds: f32, t: [f32; 2]| {
+                let seconds = (seconds * frequency_scale * 10.0_f32.powf(tilt(t))).max(0.0001);
                 (-(self.hop as f32) / (self.sample_rate * seconds)).exp()
             };
-            self.attack[k] = coefficient(s.attack_ms, s.attack_tilt);
-            self.release[k] = coefficient(s.release_ms, s.release_tilt);
+            self.attack[k] = coefficient(attack_seconds, attack_tilt);
+            self.release[k] = coefficient(release_seconds, release_tilt);
             for c in 0..2 {
                 self.channels[c].weight[k] = s.weight(f, c);
             }

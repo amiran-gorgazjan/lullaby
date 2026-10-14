@@ -177,20 +177,20 @@ impl LullabyEditor {
                 false,
             ),
             (
-                &params.attack_ms,
+                &params.attack,
                 671.0,
                 "ATTACK",
-                ["0.1 ms", "500"],
-                format!("{} ms", time_value(params.attack_ms.value())),
+                ["0", "10"],
+                format!("{:.2}", params.attack.value()),
                 false,
                 false,
             ),
             (
-                &params.release_ms,
+                &params.release,
                 899.0,
                 "RELEASE",
-                ["5 ms", "2 s"],
-                format!("{} ms", time_value(params.release_ms.value())),
+                ["0", "10"],
+                format!("{:.2}", params.release.value()),
                 false,
                 false,
             ),
@@ -459,14 +459,6 @@ impl NiceEguiApp for LullabyEditor {
             .min_size(Vec2::new(960.0, 640.0))
             .show(ui, |ui| self.draw(ui, &setter));
         ui.ctx().request_repaint_after(Duration::from_millis(33));
-    }
-}
-
-fn time_value(value: f32) -> String {
-    if value < 10.0 {
-        format!("{value:.1}")
-    } else {
-        format!("{value:.0}")
     }
 }
 

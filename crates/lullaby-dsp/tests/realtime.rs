@@ -40,11 +40,15 @@ fn audio_and_automation_never_allocate_or_free() {
         if i % 100 == 0 {
             settings.depth = (i % 11) as f32;
             settings.detail = ((i / 100) % 11) as f32;
+            settings.attack = ((i / 100) % 11) as f32;
+            settings.release = 10.0 - settings.attack;
             settings.detail_tilt = if i % 200 == 0 {
-                [-1.0, 1.0]
+                [0.1, 10.0]
             } else {
-                [1.0, -1.0]
+                [10.0, 0.1]
             };
+            settings.attack_tilt = settings.detail_tilt;
+            settings.release_tilt = [settings.detail_tilt[1], settings.detail_tilt[0]];
             settings.phase = if i % 200 == 0 {
                 Phase::Minimum
             } else {
