@@ -215,9 +215,9 @@ def plan_case(record, lullaby_parameter_info):
             elif control == "shape":
                 put("Shape", BAND_SHAPES[str(value).strip().lower()], band=band)
             elif control == "depth":
-                uncalibrated("Weight", _bounded(value, -10, 10),
-                             "Soothe3 band depth is unitless -10..10; Lullaby Weight is dB. "
-                             "Same-number weighting is exploratory, not calibrated.", band=band)
+                uncalibrated("Band depth", _bounded(value, -10, 10),
+                             "Both band depth controls use unitless -10..10; Lullaby's asymmetric "
+                             "sensitivity law is independently modeled, not verified equivalent.", band=band)
             elif control == "q":
                 q = _bounded(value, .1, 10)
                 width = 2 * math.asinh(1 / (2 * q)) / math.log(2)

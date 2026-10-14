@@ -439,20 +439,16 @@ impl Engine {
             self.forward
                 .process_with_scratch(&mut ch.detector, &mut self.scratch);
         }
-        // Link detector powers, rather than phase-cancellable waveforms.
+        // Analyze each channel's spectral context independently. Sharing raw
+        // power first can hide a quieter channel's resonances behind a louder
+        // opposite-channel peak, even when both need the same linked filter.
         for k in 0..bins {
-            let power = [
-                self.channels[0].detector[k].norm_sqr(),
-                self.channels[1].detector[k].norm_sqr(),
-            ];
-            let shared = if self.mono {
-                power[0]
-            } else {
-                (power[0] + power[1]) * 0.5
-            };
-            for (c, p) in power.iter().enumerate() {
-                let linked = *p + s.link * (shared - *p);
-                let magnitude = linked.max(0.0).sqrt() * norm;
+            for c in 0..2 {
+                let detector_channel = if self.mono { 0 } else { c };
+                let magnitude = self.channels[detector_channel].detector[k]
+                    .norm_sqr()
+                    .sqrt()
+                    * norm;
                 self.channels[c].magnitude_db[k] = gain_to_db(magnitude).max(-150.0);
             }
         }
@@ -499,6 +495,17 @@ impl Engine {
                     requested * activity * self.detail_strength[k]
                 };
             }
+        }
+        // Full linking preserves the stronger independently requested cut in
+        // each bin. Partial linking crossfeeds only the extra reduction, so
+        // linking cannot weaken a resonance already detected by either side.
+        for k in 0..bins {
+            let shared = self.channels[0].requested[k].max(self.channels[1].requested[k]);
+            for ch in &mut self.channels {
+                ch.requested[k] += s.link * (shared - ch.requested[k]);
+            }
+        }
+        for ch in &mut self.channels {
             for k in 0..bins {
                 let mut spread = ch.requested[k];
                 let lower = self.spread_lower[k];

@@ -196,6 +196,23 @@ Nested Lullaby band parameters have repeated display names. The host addresses
 them by stable `#<VST3 parameter ID>` selectors and rejects ambiguous name-only
 requests, preventing silent edits to the wrong band.
 
+Band depth now displays unitless **−10..10**. Its independent sensitivity model
+uses gentler positive emphasis than negative protection. Separate native band
+depth/Q probes reject the old assumption that each displayed band-depth unit is
+one dB of requested-reduction gain. The new law improves the reference null,
+but band response, overlapping-band interaction, Q and slope are still
+uncalibrated; their capability failures remain explicit. Width still displays
+octaves, with the existing exploratory Q conversion.
+
+Stereo linking now shares the strongest independently requested spectral cut
+between channels, before the common cut envelope and temporal smoothing. This
+preserves a quiet channel's resonance when the opposite channel contains a
+much louder peak. Independent unequal-key exports support this full-link
+behavior. Partial link and the exact ordering of linking and temporal envelopes
+remain approximate, and two linked corpus cases have small residual
+regressions. No recovered reference architecture is claimed. Partial global
+focus was checked independently and retains its existing reduction scaling.
+
 ## Results and provenance
 
 Every run includes:
@@ -238,6 +255,16 @@ normalized positions retain their new displayed counterparts (old 0.5 becomes 5)
 but its processing law has changed. Direct JSON `Settings` uses displayed units;
 old Detail 0.5 means 0.5 now, and old Depth values above 10 clamp to 10. Existing
 user presets should be reviewed and re-saved rather than assumed equivalent.
+
+The former band **Weight −24..24 dB** control now displays **Band depth −10..10**
+without dB units. The legacy `band_depth_db` host ID and `Band.depth_db` JSON/API
+field remain addressable, but their interpretation changes to unitless band
+depth. Earlier normalized automation maps to the new range (old +6 at 62.5%
+becomes +2.5); old direct JSON values above 10 clamp to 10, and even values in
+range change sensitivity. No sound-preserving conversion is promised. Factory
+positive band depths are retuned to 10 to retain useful emphasis within the new
+range; Vocal silk uses global Depth 3.5. Existing musical/locality expectations
+are unchanged. Review saved user presets before release.
 
 Attack and Release now also display **0–10**, rather than milliseconds. Defaults
 are Attack 5 and Release 3. These are unitless onset/recovery controls; the retained

@@ -292,6 +292,18 @@ fn rotary_fine_drag_and_typed_values_use_the_existing_parameter_ranges() {
 }
 
 #[test]
+fn band_depth_exposes_unitless_range() {
+    let params = LullabyParams::default();
+    for band in &params.bands {
+        assert_eq!(band.depth_db.name(), "Band depth");
+        assert_eq!(band.depth_db.unit(), "");
+        assert_eq!(band.depth_db.preview_plain(0.0), -10.0);
+        assert_eq!(band.depth_db.preview_plain(1.0), 10.0);
+        assert_eq!(band.depth_db.string_to_normalized_value("5"), Some(0.75));
+    }
+}
+
+#[test]
 fn timing_and_frequency_tilts_expose_unitless_controls_and_physical_multipliers() {
     let params = LullabyParams::default();
     for (param, default) in [(&params.attack, 5.0), (&params.release, 3.0)] {

@@ -395,6 +395,69 @@ fn fully_linked_channels_use_identical_reduction() {
 }
 
 #[test]
+fn stereo_link_preserves_each_channels_resonances_at_unequal_key_levels() {
+    let settings = Settings {
+        depth: 10.0,
+        max_cut_db: MAX_CUT_OFF,
+        external_sidechain: true,
+        link: 0.0,
+        ..Settings::default()
+    };
+    let tone = |i: usize, f: f64| (std::f64::consts::TAU * f * i as f64 / 48000.0).sin() as f32;
+    let main = |i: usize| [0.01 * (tone(i, 1056.0) + tone(i, 6000.0)); 2];
+    let key = |i: usize| [0.3 * tone(i, 1056.0), 0.03 * tone(i, 6000.0)];
+    let (unlinked, engine) = render(settings, 144000, main, key);
+    let (linked, _) = render(
+        Settings {
+            link: 1.0,
+            ..settings
+        },
+        144000,
+        main,
+        key,
+    );
+    let start = 48000 + engine.latency_samples();
+    let end = start + 48000;
+    let level = |audio: &[[f32; 2]], channel: usize, f: f64| {
+        let (mut re, mut im) = (0.0_f64, 0.0_f64);
+        for (i, frame) in audio[start..end].iter().enumerate() {
+            let phase = std::f64::consts::TAU * f * i as f64 / 48000.0;
+            re += frame[channel] as f64 * phase.cos();
+            im += frame[channel] as f64 * phase.sin();
+        }
+        20.0 * (2.0 * re.hypot(im) / 48000.0 / 0.01).log10()
+    };
+    for (channel, frequency) in [(0, 1056.0), (1, 6000.0)] {
+        let independent = level(&unlinked, channel, frequency);
+        let shared = level(&linked, channel, frequency);
+        assert!(independent < -3.0, "key must trigger useful suppression");
+        assert!(
+            (shared - independent).abs() < 0.2,
+            "{frequency}Hz linking weakened independent cut: {independent} -> {shared}dB"
+        );
+    }
+    for frame in &linked[start..end] {
+        assert!((frame[0] - frame[1]).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn band_depth_is_unitless_and_retains_gentle_emphasis_and_stronger_protection() {
+    let mut settings = Settings::default();
+    settings.bands[0] = Band::bell(1000.0, 5.0, 1.0);
+    let emphasis = settings.weight(1000.0, 0);
+    settings.bands[0].depth_db = -5.0;
+    let protection = settings.weight(1000.0, 0);
+    assert!(emphasis > 1.1 && emphasis < 1.5);
+    assert!(protection > 0.4 && protection < 0.7);
+    assert!(settings.weight(10000.0, 0) > 0.99);
+    settings.bands[0].depth_db = -24.0;
+    assert_eq!(settings.sanitized().bands[0].depth_db, -10.0);
+    settings.bands[0].depth_db = f32::NAN;
+    assert_eq!(settings.sanitized().bands[0].depth_db, 0.0);
+}
+
+#[test]
 fn mid_side_can_leave_mid_untouched() {
     let s = Settings {
         stereo_mode: StereoMode::MidSide,

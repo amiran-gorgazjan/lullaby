@@ -230,14 +230,17 @@ impl LullabyEditor {
             }
         }
         if self.bands_panel || settings.bands.iter().any(|band| band.enabled) {
-            let weight_y = |db: f32| plot.center().y - db / 24.0 * plot.height() * 0.42;
+            let weight_y = |depth: f32| plot.center().y - depth / 10.0 * plot.height() * 0.42;
             for (channel, color) in [(0, CLAY), (1, SAGE.gamma_multiply(0.7))] {
                 let curve = (0..METER_BINS)
                     .map(|i| {
                         let f = 20.0 * 1000.0_f32.powf(i as f32 / (METER_BINS - 1) as f32);
                         Pos2::new(
                             x(f),
-                            weight_y(gain_to_db(settings.weight(f, channel)).clamp(-24.0, 24.0)),
+                            weight_y({
+                                let db = gain_to_db(settings.weight(f, channel));
+                                (if db > 0.0 { 2.0 * db } else { db }).clamp(-10.0, 10.0)
+                            }),
                         )
                     })
                     .collect();
@@ -267,8 +270,8 @@ impl LullabyEditor {
                     setter.set_parameter(&param.frequency, frequency_at(plot, pos.x));
                     setter.set_parameter(
                         &param.depth_db,
-                        ((plot.center().y - pos.y) / (plot.height() * 0.42) * 24.0)
-                            .clamp(-24.0, 24.0),
+                        ((plot.center().y - pos.y) / (plot.height() * 0.42) * 10.0)
+                            .clamp(-10.0, 10.0),
                     );
                 }
                 if node.drag_stopped() {

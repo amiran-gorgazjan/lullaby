@@ -22,7 +22,7 @@ def inventory():
         ("Phase", 0, 1), ("Quality", 0, 3), ("Band audition", -1, 7),
         *[(title, minimum, maximum) for _ in range(8) for title, minimum, maximum in
           [("Enabled", 0, 1), ("Shape", 0, 7), ("Frequency", 20, 20000),
-           ("Weight", -24, 24), ("Width", .1, 4), ("Focus", -1, 1)]],
+           ("Band depth", -10, 10), ("Width", .1, 4), ("Focus", -1, 1)]],
     ]
     return [{"id": index + 100, "name": title, "flags": 0 if title in ("Quality", "Band audition") else 1,
              "mapping": [{"plain": minimum}, {"plain": maximum}]}
@@ -66,6 +66,11 @@ class AdapterTests(unittest.TestCase):
         source_issues = {p["source_parameter"] for p in result["unsupported"]}
         self.assertIn("Band 4 depth", source_issues)
         self.assertIn("Band 4 q", source_issues)
+        depth_id = [f"#{p['id']}" for p in metadata if p["name"] == "Band depth"][3]
+        self.assertEqual(result["host_settings"][depth_id], "5")
+        self.assertEqual(result["expected_parameters"][depth_id]["plain"], 5)
+        depth_issue = next(p for p in result["unsupported"] if p["source_parameter"] == "Band 4 depth")
+        self.assertEqual(depth_issue["code"], "uncalibrated_scale")
 
     def test_frequency_tilts_keep_physical_multipliers_and_semantic_failures(self):
         result = self.plan({"Attack tilt low": ".1x", "Release tilt high": "10x"})

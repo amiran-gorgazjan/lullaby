@@ -320,14 +320,13 @@ impl BandParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(1))
             .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
             depth_db: FloatParam::new(
-                "Weight",
+                "Band depth",
                 0.0,
                 FloatRange::Linear {
-                    min: -24.0,
-                    max: 24.0,
+                    min: -10.0,
+                    max: 10.0,
                 },
             )
-            .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
             width: FloatParam::new("Width", 1.0, FloatRange::Linear { min: 0.1, max: 4.0 })
                 .with_unit(" oct")

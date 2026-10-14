@@ -67,6 +67,8 @@ pub struct Band {
     pub enabled: bool,
     pub shape: BandShape,
     pub frequency: f32,
+    /// Unitless -10..10 band sensitivity. The legacy field/host ID is retained
+    /// for addressability; this is not a dB boost or an audio EQ gain.
     pub depth_db: f32,
     /// Width in octaves, rather than an analog filter's Q.
     pub width: f32,
@@ -206,7 +208,7 @@ impl Settings {
         }
         for band in &mut self.bands {
             band.frequency = clamp(band.frequency, 20.0, 20000.0, 1000.0);
-            band.depth_db = clamp(band.depth_db, -24.0, 24.0, 0.0);
+            band.depth_db = clamp(band.depth_db, -10.0, 10.0, 0.0);
             band.width = clamp(band.width, 0.1, 4.0, 1.0);
             band.focus = clamp(band.focus, -1.0, 1.0, 0.0);
         }
@@ -250,7 +252,11 @@ impl Settings {
         if has_pass {
             mask *= pass;
         }
-        db_to_gain(db.clamp(-48.0, 36.0)) * mask * channel_focus(self.focus, channel)
+        // Independently modeled band sensitivity. Positive emphasis grows
+        // more gently than protection; native positive-depth probes reject
+        // treating each displayed unit as one dB of requested reduction.
+        let sensitivity_db = if db > 0.0 { 0.5 * db } else { db };
+        db_to_gain(sensitivity_db.clamp(-48.0, 36.0)) * mask * channel_focus(self.focus, channel)
     }
 }
 
@@ -283,16 +289,17 @@ pub fn factory_preset(index: usize) -> Settings {
     let mut s = Settings::default();
     match index {
         1 => {
-            s.bands[0] = Band::bell(3200.0, 6.0, 1.5);
+            s.depth = 3.5;
+            s.bands[0] = Band::bell(3200.0, 10.0, 1.5);
             s.max_cut_db = 8.0;
         }
         2 => {
-            s.bands[0] = Band::bell(7000.0, 9.0, 2.0);
+            s.bands[0] = Band::bell(7000.0, 10.0, 2.0);
             s.attack = 3.5;
             s.release = 4.6;
         }
         3 => {
-            s.bands[0] = Band::bell(300.0, 9.0, 1.5);
+            s.bands[0] = Band::bell(300.0, 10.0, 1.5);
             s.attack = 6.9;
             s.max_cut_db = 6.0;
         }
@@ -306,7 +313,7 @@ pub fn factory_preset(index: usize) -> Settings {
             s.external_sidechain = true;
             s.depth = 10.0;
             s.max_cut_db = 9.0;
-            s.bands[0] = Band::bell(1800.0, 6.0, 2.0);
+            s.bands[0] = Band::bell(1800.0, 10.0, 2.0);
         }
         _ => {}
     }
