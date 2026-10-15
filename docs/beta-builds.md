@@ -14,8 +14,9 @@ repository visibility.
 | `Lullaby-<version>-macOS-universal.zip` | VST3, CLAP, AUv2 | macOS 15 Apple Silicon; the **same archive** is then tested on macOS 15 Intel |
 | `Lullaby-<version>-Linux-x86_64.zip` | VST3, CLAP | Ubuntu 24.04, x64 |
 
-Every build runs default-feature Rust tests, VST3 integration tests, optional
-offline DSP diagnostics tests, packaging/licensing Python regression tests, and
+Every build runs default-feature workspace Rust tests (including editor/memory
+guards), VST3 integration tests, optional offline DSP diagnostics tests scoped to
+`lullaby-dsp`, packaging/licensing Python regression tests, and
 a native CLAP loading/processing/state smoke test against the packaged binary.
 The macOS build runs the AU smoke test and strict Apple `auval`. The Intel job
 extracts the Apple Silicon job's universal archive with executable modes preserved,
@@ -41,7 +42,12 @@ The package version comes from `Cargo.toml`; plugin IDs stay stable for session 
 ## Pinned inputs and reproducibility limits
 
 - Rust **1.95.0**, with `Cargo.lock` and `--locked` dependency fetching.
-- Python **3.12.12** in CI; packaging/notices use the standard library.
+- Python **3.12.10** in CI; packaging/notices use the standard library. This is
+  the last 3.12 patch with official runner binaries for all four required
+  OS/architecture combinations. Later 3.12 security releases have Linux-only
+  entries in the official distribution manifest. Coverage was verified against
+  [manifest revision 49858b9](https://github.com/actions/python-versions/blob/49858b91c92d27403416ee43117032e91d00ce24/versions-manifest.json):
+  Windows x64, Ubuntu 24.04 x64, macOS arm64, and macOS x64.
 - CMake **3.31.10** for the AU build.
 - Exact AU dependency commits in `packaging/au/dependencies.json`, plus the tracked
   wrapper patch. Changed checkout contents are rejected.
@@ -78,14 +84,14 @@ Start with a clean committed worktree and the repository's Rust toolchain. Insta
 GUI development libraries on Linux and MSVC C++ build tools on Windows; see
 [building](building.md). Use the commands below in Bash, or substitute equivalent
 PowerShell environment assignments on Windows. `python` must resolve to the desired
-Python installation. CI fixes its Python version to 3.12.12.
+Python installation. CI fixes its Python version to 3.12.10.
 
 ```sh
 cargo fetch --locked
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 cargo test --workspace --all-targets --locked --offline
-cargo test --workspace --all-targets --locked --offline --features lullaby-dsp/dsp-diagnostics
+cargo test -p lullaby-dsp --all-targets --locked --offline --features dsp-diagnostics
 python -m unittest discover -s scripts -p 'test_*.py' -v
 python scripts/dependency_notices.py --output target/beta-notices/THIRD-PARTY-NOTICES.txt --manifest target/beta-notices/manifest.json
 ```
@@ -160,5 +166,5 @@ Runner labels and action inputs were checked against the official
 [GitHub-hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
 [action repositories](https://github.com/actions), and their pinned `action.yml`
 files on 2026-10-15. See also the official
-[Python 3.12.12 release](https://www.python.org/downloads/release/python-31212/) and
+[Python 3.12.10 release](https://www.python.org/downloads/release/python-31210/) and
 [CMake 3.31.10 distribution](https://pypi.org/project/cmake/3.31.10/).

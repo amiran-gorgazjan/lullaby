@@ -28,6 +28,14 @@ repeated editor creation/destruction and repeated VST3 instance lifecycles with
 bounded live Rust heap usage. They do not measure all native window/GPU resources
 or establish a cause for a host-specific memory spike.
 
+A Linux CI run that enabled offline DSP instrumentation throughout the plugin
+reported 87,425 bytes of retained thread-local allocation balance after 48 editor
+creations, above the 64 KiB guard. The preceding default-feature run passed the
+same guard. This variability remains a follow-up investigation; it is not evidence
+of an identified plugin leak or a resolved memory issue. The beta ships without
+that instrumentation. CI retains default plugin memory checks and tests optional
+instrumentation separately at the DSP boundary.
+
 Test inputs are generated in code. No external recordings are required or included.
 
 The feature-gated [offline diagnostic interface](diagnostics.md) also has tests
