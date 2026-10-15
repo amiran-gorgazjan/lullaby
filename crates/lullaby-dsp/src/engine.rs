@@ -660,6 +660,7 @@ impl Engine {
                 ch.requested[k] += s.link * (shared - ch.requested[k]);
             }
         }
+        let soft_depth_scale = self.depth_amount / (0.03 * 10.0_f32.powf(1.15));
         for ch in &mut self.channels {
             for k in 0..bins {
                 let mut spread = ch.requested[k];
@@ -669,6 +670,12 @@ impl Engine {
                 let weights = &self.spread_kernel[start..start + upper - lower];
                 for (&requested, &weight) in ch.requested[lower..upper].iter().zip(weights) {
                     spread = spread.max(requested * weight);
+                }
+                if s.mode == Mode::Soft && s.depth < 10.0 {
+                    // A phenomenological Depth contour map in reciprocal-gain
+                    // excess, anchored to the existing Depth10 contour. Geometry
+                    // and detector admission remain independent of this mapping.
+                    spread = soft_depth_compand(spread, soft_depth_scale);
                 }
                 let target = if k == 0 {
                     0.0
@@ -760,6 +767,27 @@ impl Engine {
     }
 }
 
+fn soft_depth_compand(spread: f32, amount: f32) -> f32 {
+    if spread <= 0.0 || amount <= 0.0 {
+        return 0.0;
+    }
+    if amount >= 1.0 {
+        return spread;
+    }
+    let k = std::f32::consts::LN_10 / 20.0;
+    let x = (spread / amount) * k;
+    let log_excess = if x < 50.0 {
+        (amount * x.exp_m1()).ln_1p()
+    } else {
+        // log(a*exp(x) + 1-a), without overflowing the exponential.
+        let u = amount.ln() + x;
+        let v = (-amount).ln_1p();
+        let upper = u.max(v);
+        upper + (u.min(v) - upper).exp().ln_1p()
+    };
+    (log_excess / k).max(0.0)
+}
+
 // Kept separate from exp() calls so the source-normalization arithmetic can
 // vectorize. Scratch storage is bounded at construction and shared by channels.
 fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [f32], width: f32) {
@@ -774,6 +802,61 @@ fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn soft_depth_compander_is_stable_at_endpoints_and_tiny_amounts() {
+        assert_eq!(soft_depth_compand(0.0, 0.0), 0.0);
+        assert_eq!(soft_depth_compand(100.0, 0.0), 0.0);
+        for amount in [1e-30, 1e-12, 1e-5, 0.01, 0.5, 0.999, 1.0] {
+            let mut previous = 0.0;
+            for full_cut in [0.0, 1e-6, 0.01, 1.0, 20.0, 100.0, 512.0] {
+                let spread = amount * full_cut;
+                let actual = soft_depth_compand(spread, amount);
+                let k = std::f64::consts::LN_10 / 20.0;
+                let expected =
+                    ((amount as f64) * ((spread as f64 / amount as f64) * k).exp_m1()).ln_1p() / k;
+                assert!(actual.is_finite() && actual >= previous);
+                assert!((actual as f64 - expected).abs() <= expected.max(1e-30) * 1e-5);
+                if amount == 1.0 {
+                    assert_eq!(actual.to_bits(), spread.to_bits());
+                }
+                previous = actual;
+            }
+        }
+    }
+
+    #[test]
+    fn soft_depth_automation_keeps_geometry_and_strong_outputs_finite() {
+        for rate in [44100.0, 48000.0, 96000.0] {
+            for mono in [false, true] {
+                let mut engine = Engine::new(rate, Quality::Normal, mono);
+                let mut settings = Settings {
+                    external_sidechain: true,
+                    ..Default::default()
+                };
+                engine.set_settings(settings);
+                let kernel = engine.spread_kernel.clone();
+                for depth in [0.0, 1e-30, 1e-5, 0.01, 0.5, 6.0, 9.999, 10.0] {
+                    settings.depth = depth;
+                    engine.set_settings(settings);
+                    assert_eq!(engine.spread_kernel, kernel);
+                    for i in 0..4096 {
+                        let tone = (i as f32 * 0.073).sin() * 64.0;
+                        assert!(
+                            engine
+                                .process_sample([tone, -tone], [tone, tone])
+                                .iter()
+                                .all(|x| x.is_finite())
+                        );
+                    }
+                }
+                engine.reset();
+                for _ in 0..4096 {
+                    assert_eq!(engine.process_sample([0.0; 2], [0.0; 2]), [0.0; 2]);
+                }
+            }
+        }
+    }
 
     #[test]
     fn alternating_controls_match_forced_full_coefficient_rebuilds() {

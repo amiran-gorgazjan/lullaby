@@ -23,6 +23,14 @@ at construction; existing buffers are borrowed for the other stages. Activity is
 unitless; cuts are positive dB. Peak and activity floor are the actual scalar
 values used by the detector. No reconstruction is performed by the Interface.
 
+In Soft mode, spread cut includes the Depth contour mapping after the maximum
+kernel pass. Requested and linked cut remain the detector's positive dB requests.
+For Depth below 10, the spread is mapped through reciprocal-gain excess before
+band weighting, Max cut and final smoothing; Depth 10 and Hard retain their
+existing spread. The trace does not expose a separate array for the unmapped
+maximum. This is an approximation of the Depth-dependent contour, not a claim
+about the reference plugin's internal coordinate.
+
 The complex logarithm is captured after minimum-phase cepstral conversion (or
 before exponentiation for linear phase). `exp(log_filter)` reconstructs the
 **designed** complex bin filter. WOLA synthesis, windowing, overlap and temporal
