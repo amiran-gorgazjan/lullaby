@@ -120,11 +120,12 @@ class TemporaryComponentTests(unittest.TestCase):
             self.destination.symlink_to(self.root / "absent")
         except OSError:
             self.skipTest("Symlink creation unavailable on this host")
+        original_target = os.readlink(self.destination)
         with self.assertRaises(FileExistsError):
             with auval.temporary_component(self.source, self.destination):
                 self.fail("dangling symlink must not be replaced")
         self.assertTrue(self.destination.is_symlink())
-        self.assertEqual(os.readlink(self.destination), str(self.root / "absent"))
+        self.assertEqual(os.readlink(self.destination), original_target)
 
     def test_publication_race_preserves_new_external_installation(self):
         def raced_publish(source, destination):
