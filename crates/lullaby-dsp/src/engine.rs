@@ -110,6 +110,7 @@ pub struct Engine {
     kernel_scale: Vec<f32>,
     contrast_scale: Vec<f32>,
     detail_strength: Vec<f32>,
+    soft_depth_blend: Vec<f32>,
     threshold: Vec<f32>,
     hard_threshold: Vec<f32>,
     audition_mask: Vec<f32>,
@@ -199,6 +200,7 @@ impl Engine {
             kernel_scale: vec![0.0; n / 2 + 1],
             contrast_scale: vec![1.0; n / 2 + 1],
             detail_strength: vec![0.0; n / 2 + 1],
+            soft_depth_blend: vec![1.0; n / 2 + 1],
             threshold: vec![0.0; n / 2 + 1],
             hard_threshold: vec![0.0; n / 2 + 1],
             audition_mask: vec![0.0; n / 2 + 1],
@@ -346,6 +348,11 @@ impl Engine {
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
             let detail = (s.detail / 10.0 + 0.5 * tilt(detail_tilt)).clamp(0.0, 1.0);
             if detail_changed {
+                // The added Soft Depth curvature is supported at default Detail,
+                // but overcuts shoulders at maximum Detail. Continuously blend
+                // that added dB cut out using the same effective tilted Detail.
+                // This endpoint interpolation is an approximation, not a native law.
+                self.soft_depth_blend[k] = (2.0 * (1.0 - detail)).clamp(0.0, 1.0);
                 // Independently modeled Gaussian cut envelope in square-root
                 // frequency. Its absolute bandwidth grows with frequency while its
                 // relative bandwidth narrows; Detail controls concentration.
@@ -671,11 +678,17 @@ impl Engine {
                 for (&requested, &weight) in ch.requested[lower..upper].iter().zip(weights) {
                     spread = spread.max(requested * weight);
                 }
-                if s.mode == Mode::Soft && s.depth < 10.0 {
+                if s.mode == Mode::Soft && s.depth < 10.0 && self.soft_depth_blend[k] > 0.0 {
                     // A phenomenological Depth contour map in reciprocal-gain
                     // excess, anchored to the existing Depth10 contour. Geometry
                     // and detector admission remain independent of this mapping.
-                    spread = soft_depth_compand(spread, soft_depth_scale);
+                    let mapped = soft_depth_compand(spread, soft_depth_scale);
+                    spread = if self.soft_depth_blend[k] >= 1.0 {
+                        // Preserve the validated default-Detail arithmetic exactly.
+                        mapped
+                    } else {
+                        spread + self.soft_depth_blend[k] * (mapped - spread)
+                    };
                 }
                 let target = if k == 0 {
                     0.0
@@ -836,10 +849,12 @@ mod cache_tests {
                 };
                 engine.set_settings(settings);
                 let kernel = engine.spread_kernel.clone();
+                let blend = engine.soft_depth_blend.clone();
                 for depth in [0.0, 1e-30, 1e-5, 0.01, 0.5, 6.0, 9.999, 10.0] {
                     settings.depth = depth;
                     engine.set_settings(settings);
                     assert_eq!(engine.spread_kernel, kernel);
+                    assert_eq!(engine.soft_depth_blend, blend);
                     for i in 0..4096 {
                         let tone = (i as f32 * 0.073).sin() * 64.0;
                         assert!(
@@ -853,6 +868,79 @@ mod cache_tests {
                 engine.reset();
                 for _ in 0..4096 {
                     assert_eq!(engine.process_sample([0.0; 2], [0.0; 2]), [0.0; 2]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn detail_interaction_preserves_endpoints_and_bounds_actual_reduction() {
+        // Ablate only the added curvature, keeping the real detector, synthesis
+        // and settings paths. This guards audio identity and control interactions
+        // without duplicating the interpolation formula.
+        for rate in [44100.0, 48000.0, 96000.0] {
+            for mono in [false, true] {
+                for (mode, depth, detail, tilts, cap) in [
+                    (Mode::Soft, 6.0, 5.0, [1.0; 2], 24.0),
+                    (Mode::Soft, 6.0, 7.5, [0.1, 10.0], 24.0),
+                    (Mode::Soft, 6.0, 10.0, [1.0; 2], 24.0),
+                    (Mode::Soft, 10.0, 7.5, [1.0; 2], 24.0),
+                    (Mode::Hard, 6.0, 7.5, [1.0; 2], 24.0),
+                    (Mode::Soft, 0.0, 7.5, [1.0; 2], 24.0),
+                    (Mode::Soft, 6.0, 7.5, [1.0; 2], 2.0),
+                ] {
+                    let settings = Settings {
+                        mode,
+                        depth,
+                        detail,
+                        detail_tilt: tilts,
+                        max_cut_db: cap,
+                        attack: 0.0,
+                        release: 0.0,
+                        external_sidechain: true,
+                        ..Default::default()
+                    };
+                    let mut actual = Engine::new(rate, Quality::Normal, mono);
+                    let mut full = Engine::new(rate, Quality::Normal, mono);
+                    let mut original = Engine::new(rate, Quality::Normal, mono);
+                    for engine in [&mut actual, &mut full, &mut original] {
+                        engine.set_settings(settings);
+                    }
+                    full.soft_depth_blend.fill(1.0);
+                    original.soft_depth_blend.fill(0.0);
+                    for i in 0..4096 {
+                        let x = [(i as f32 * 0.031).sin() * 0.1; 2];
+                        let key = [(i as f32 * 0.17).sin() * 0.3, (i as f32 * 0.61).sin() * 0.2];
+                        let y = actual.process_sample(x, key);
+                        let f = full.process_sample(x, key);
+                        let o = original.process_sample(x, key);
+                        assert!(y.iter().all(|v| v.is_finite()));
+                        if detail == 5.0 || mode == Mode::Hard || depth == 10.0 {
+                            assert_eq!(y.map(f32::to_bits), f.map(f32::to_bits));
+                        }
+                        if detail == 10.0 || mode == Mode::Hard || depth == 10.0 {
+                            assert_eq!(y.map(f32::to_bits), o.map(f32::to_bits));
+                        }
+                    }
+                    for c in 0..2 {
+                        for k in 0..=actual.n / 2 {
+                            let a = actual.channels[c].reduction[k];
+                            let f = full.channels[c].reduction[k];
+                            let o = original.channels[c].reduction[k];
+                            assert!(a >= o.min(f) - 1e-5 && a <= o.max(f) + 1e-5);
+                            if cap < 24.0 {
+                                assert!(a <= cap);
+                            }
+                            if depth == 0.0 {
+                                assert_eq!(a, 0.0);
+                            }
+                        }
+                    }
+                    actual.reset();
+                    actual.set_settings(settings);
+                    for _ in 0..4096 {
+                        assert_eq!(actual.process_sample([0.0; 2], [0.0; 2]), [0.0; 2]);
+                    }
                 }
             }
         }

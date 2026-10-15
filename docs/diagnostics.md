@@ -26,8 +26,10 @@ values used by the detector. No reconstruction is performed by the Interface.
 In Soft mode, spread cut includes the Depth contour mapping after the maximum
 kernel pass. Requested and linked cut remain the detector's positive dB requests.
 For Depth below 10, the spread is mapped through reciprocal-gain excess before
-band weighting, Max cut and final smoothing; Depth 10 and Hard retain their
-existing spread. The trace does not expose a separate array for the unmapped
+band weighting, Max cut and final smoothing. The added dB cut is retained fully
+through effective Detail 5, then blended continuously to zero at effective
+Detail 10, using the existing per-bin Detail and low/high tilts. Depth 10 and
+Hard retain their existing spread. The trace does not expose a separate array for the unmapped
 maximum. This is an approximation of the Depth-dependent contour, not a claim
 about the reference plugin's internal coordinate.
 
