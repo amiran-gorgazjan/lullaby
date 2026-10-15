@@ -16,7 +16,6 @@ pub struct DiagnosticChannel<'a> {
     /// After activity/detail/startup gating, before stereo linking.
     pub requested_db: &'a [f32],
     pub linked_db: &'a [f32],
-    /// After kernel spreading and the Detail-blended Soft Depth map, before weighting.
     pub spread_db: &'a [f32],
     /// After weighting and Max cut, before attack/release smoothing.
     pub target_db: &'a [f32],

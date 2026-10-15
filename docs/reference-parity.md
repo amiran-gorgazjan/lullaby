@@ -337,24 +337,3 @@ Allocation-free automation does not guarantee a host deadline: the local 96 kHz,
 Ultra, 64-sample audit still observes block-time spikes under rapidly changing
 Detail or its tilts. Larger blocks provide more headroom; no universal DAW CPU
 or glitch-free automation claim follows from these local measurements.
-
-The lower-Depth Soft contour now adds a reciprocal-gain-excess map after the
-maximum spread and before band weights, Max cut and smoothing. With the existing
-Depth amount ratio `a`, it maps positive dB spread `S` to
-`log1p(a * expm1(k * S / a)) / k`, where `k = ln(10) / 20`.
-Depth zero stays zero; Depth 10 and Hard retain the original spread. Independent
-default-Detail controls and the fixed corpus support a limited improvement, with
-remaining lower-key and paired-key complex-response regressions. This is a
-phenomenological approximation, not an identified reference equation.
-
-Maximum-Detail measurements contradicted applying that added curvature everywhere:
-the peak became closer while shoulder overcut and its implied phase error grew.
-The added dB cut is therefore retained fully through effective Detail 5 and
-linearly blended out by effective Detail 10, using the same per-bin Detail and
-logarithmic tilts as the detector. Two independently captured intermediate
-controls at Detail 7.5 and 9 support this fixed interpolation; their steady raw
-and complex residuals improve, with small recovery regressions below 0.005 dB.
-Depth does not rebuild spread geometry or the preallocated Detail weights.
-The native admission, spatial composition, long history and sample-rate topology
-remain unresolved. Strict reference parity is still failing; supported controls
-do not establish universal equivalence.
