@@ -6,10 +6,11 @@ import json
 import os
 from pathlib import Path
 import platform
-import plistlib
 import shutil
 import subprocess
 import sys
+
+from prepare_bundles import apple_version, stamp_plist
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,9 +47,13 @@ def main():
     parser.add_argument("--locked", action="store_true")
     parser.add_argument("--offline", action="store_true", help="Use cached Cargo and AU dependencies only")
     parser.add_argument("--universal", action="store_true", help="Build arm64 + x86_64 (requires both Rust targets)")
+    parser.add_argument("--fetch-dependencies-only", action="store_true", help="Fetch and verify pinned AU sources without building")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("AU builds require macOS; use `cargo xtask bundle lullaby` for VST3/CLAP on other OSes")
+    if args.fetch_dependencies_only:
+        dependencies(args.offline)
+        return
     for tool in ("cargo", "cmake", "git", "patch", "xcrun", "codesign"):
         if not shutil.which(tool):
             raise RuntimeError(f"Missing {tool}; see docs/audio-unit.md for build prerequisites")
@@ -61,6 +66,7 @@ def main():
     run("cargo", "xtask", "bundle-universal" if args.universal else "bundle", "lullaby", *flags, env=env)
     metadata = json.loads(run("cargo", "metadata", "--no-deps", "--format-version=1", "--offline", capture=True, env=env))
     version = next(p["version"] for p in metadata["packages"] if p["name"] == "lullaby")
+    bundle_version = apple_version(version)
     target = Path(metadata["target_directory"])
     clap = target / "bundled/Lullaby.clap"
     archs = run("lipo", "-archs", clap / "Contents/MacOS/Lullaby", capture=True).split()
@@ -77,7 +83,7 @@ def main():
     run("cmake", "-S", ROOT / "packaging/au", "-B", build, "-G", "Unix Makefiles",
         f"-DCMAKE_BUILD_TYPE={config}", f"-DCMAKE_OSX_ARCHITECTURES={';'.join(sorted(archs))}",
         f"-DCMAKE_OSX_DEPLOYMENT_TARGET={env['MACOSX_DEPLOYMENT_TARGET']}",
-        f"-DLULLABY_AU_DEPS={cache}", f"-DLULLABY_CLAP={clap}", f"-DLULLABY_VERSION={version}", env=env)
+        f"-DLULLABY_AU_DEPS={cache}", f"-DLULLABY_CLAP={clap}", f"-DLULLABY_VERSION={bundle_version}", env=env)
     run("cmake", "--build", build, "--config", config, "--parallel", str(os.cpu_count() or 2), env=env)
     component = build / "Lullaby.component"
     embedded = component / "Contents/PlugIns/Lullaby.clap"
@@ -85,16 +91,15 @@ def main():
     if embedded.exists():
         shutil.rmtree(embedded)
     shutil.copytree(clap, embedded)
-    # nice-plug-xtask 0.1.1 emits a placeholder version; correct the embedded copy.
-    info_path = embedded / "Contents/Info.plist"
-    info = plistlib.loads(info_path.read_bytes())
-    info.update(CFBundleVersion=version, CFBundleShortVersionString=version)
-    info_path.write_bytes(plistlib.dumps(info))
+    stamp_plist(embedded / "Contents/Info.plist", version)
+    stamp_plist(component / "Contents/Info.plist", version)
     resources = component / "Contents/Resources"
     resources.mkdir(exist_ok=True)
-    notices = ["Lullaby AUv2 third-party notices", (ROOT / "LICENSE").read_text()]
+    notices = [(embedded / "Contents/Resources/THIRD-PARTY-NOTICES.txt").read_text(), "Lullaby AUv2 native-wrapper notices", (ROOT / "LICENSE").read_text()]
     notices += ["Previously distributed MIT baseline", (ROOT / "licenses/MIT-BASELINE.txt").read_text()]
     shutil.copyfile(embedded / "Contents/Resources/LULLABY-LICENSES.txt", resources / "LULLABY-LICENSES.txt")
+    shutil.copyfile(embedded / "Contents/Resources/FONT-LICENSES.txt", resources / "FONT-LICENSES.txt")
+    shutil.copyfile(embedded / "Contents/Resources/DEPENDENCY-MANIFEST.json", resources / "DEPENDENCY-MANIFEST.json")
     notices += ["Interface fonts", (embedded / "Contents/Resources/FONT-LICENSES.txt").read_text()]
     for name, license_file in (("clap-wrapper", "LICENSE"), ("clap", "LICENSE"), ("AudioUnitSDK", "LICENSE.txt")):
         notices += [name, (cache / name / license_file).read_text()]

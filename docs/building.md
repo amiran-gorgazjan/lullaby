@@ -1,6 +1,7 @@
 # Building and installing Lullaby
 
-Install Rust through rustup. The repository selects Rust **1.95.0** automatically.
+Install Rust through rustup and Python **3.9+** for license/version preparation.
+The repository selects Rust **1.95.0** automatically.
 Windows needs the MSVC C++ build tools; macOS needs Xcode command-line tools.
 On Debian/Ubuntu, install the GUI development libraries:
 
@@ -24,8 +25,11 @@ including its resources, to a plugin directory scanned by the DAW:
 | Linux | `~/.vst3` | `~/.clap` |
 
 Keep `FONT-LICENSES.txt` and `LULLABY-LICENSES.txt` with distributions, including
-single-file CLAP builds. Release archives must also include the complete applicable
-third-party notices; generation of those notices remains a release task.
+single-file CLAP builds. Bundling now generates `THIRD-PARTY-NOTICES.txt` and
+`DEPENDENCY-MANIFEST.json` from checksum-verified locked dependency archives and
+embeds them in directory bundles. Run `cargo fetch --locked` first to cache all
+platforms' license sources. For versioned beta ZIPs and checksums, see
+[private beta builds](beta-builds.md).
 See [licensing](licensing.md).
 
 Builds target the current machine's architecture. For universal macOS VST3/CLAP

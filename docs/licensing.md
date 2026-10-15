@@ -24,9 +24,11 @@ cannot override rights in code owned or separately licensed by others.
 Dependencies retain their licenses. Embedded fonts retain their copyright and
 license notices in [assets/fonts](../assets/fonts/README.md). Commercial release
 packaging must include the project license, the MIT baseline notice and all
-applicable third-party notices. Complete, reproducible dependency-notice
-packaging remains a release task; the font notices alone do not cover the whole
-dependency graph.
+applicable third-party notices. The maintained notice generator verifies the full
+locked dependency graph against Cargo's source archive checksums and pinned
+upstream notice files. Bundles and [beta archives](beta-builds.md) include those
+notices and their dependency manifest; AU bundles also include native-wrapper
+notices.
 
 Uncleared recordings, design reference images and investigation material are
 excluded from the maintained source tree and distributions. Private records are

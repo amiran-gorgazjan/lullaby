@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.ttf binary
+*.png binary
+*.wav binary
+# Pinned upstream legal texts retain their original ending blank lines.
+packaging/licenses/** whitespace=-blank-at-eof
