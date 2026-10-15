@@ -139,7 +139,9 @@ jobs:
           test "$(uname -m)" = arm64
           for bundle in target/bundled/Lullaby.vst3 target/bundled/Lullaby.clap target/bundled/Lullaby.component; do
             codesign --verify --deep --strict "$bundle"
-            lipo -verify_arch arm64 x86_64 "$bundle/Contents/MacOS/Lullaby"
+            for arch in arm64 x86_64; do
+              lipo "$bundle/Contents/MacOS/Lullaby" -verify_arch "$arch"
+            done
           done
           python scripts/auval.py
       - name: Record verified build provenance
@@ -202,7 +204,9 @@ jobs:
         run: |
           for bundle in "$BETA_ROOT/Lullaby.vst3" "$BETA_ROOT/Lullaby.clap" "$BETA_ROOT/Lullaby.component"; do
             codesign --verify --deep --strict "$bundle"
-            lipo -verify_arch arm64 x86_64 "$bundle/Contents/MacOS/Lullaby"
+            for arch in arm64 x86_64; do
+              lipo "$bundle/Contents/MacOS/Lullaby" -verify_arch "$arch"
+            done
           done
       - name: Test the actual Intel CLAP and AU binaries
         run: |
