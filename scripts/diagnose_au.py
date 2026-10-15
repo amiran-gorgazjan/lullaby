@@ -73,6 +73,9 @@ with auval.temporary_component(source, destination):
     if not success:
         tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
         success = attempt("explicit-bundle-registration", lambda: command("lsregister", [tool, "-f", str(destination)]))
+    if not success:
+        service = f"gui/{os.getuid()}/com.apple.audio.AudioComponentRegistrar"
+        success = attempt("launchd-restart", lambda: command("launchd-kickstart", ["launchctl", "kickstart", "-kp", service]))
     snapshot("finished", destination)
     command("registrar-logs", ["log", "show", "--last", "10m", "--style", "compact", "--info", "--debug", "--predicate", 'process == "AudioComponentRegistrar" OR process == "auvaltool"'], timeout=30)
 (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
