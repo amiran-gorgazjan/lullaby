@@ -143,7 +143,7 @@ jobs:
               lipo "$bundle/Contents/MacOS/Lullaby" -verify_arch "$arch"
             done
           done
-          python scripts/auval.py
+          python scripts/auval.py --ci-refresh-registrar
       - name: Record verified build provenance
         run: python scripts/package_release.py --platform '${{ matrix.platform }}' --bundles target/bundled --receipt target/beta-build.json --record-build --build-start "$BUILD_STARTED_EPOCH"
       - name: Create and verify the beta archive
@@ -157,8 +157,12 @@ jobs:
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: beta-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
+          # Keep successful builds available when only a downstream job is
+          # retried. Downloads are scoped to this workflow run, and every ZIP
+          # is still checked against the exact source commit.
+          name: beta-${{ matrix.platform }}-${{ github.sha }}
           path: target/beta-packages/*
+          overwrite: true
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
@@ -180,7 +184,7 @@ jobs:
           python-version: '3.12.10'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: beta-macOS-universal-${{ github.sha }}-${{ github.run_attempt }}
+          name: beta-macOS-universal-${{ github.sha }}
           path: target/downloaded-beta
           digest-mismatch: error
       - name: Verify and extract the exact Apple Silicon job's archive
@@ -213,7 +217,7 @@ jobs:
           python scripts/clap_smoke.py "$BETA_ROOT/Lullaby.clap/Contents/MacOS/Lullaby"
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror scripts/macos_au_smoke.mm -framework AudioToolbox -framework Cocoa -o target/intel-au-smoke
           target/intel-au-smoke "$BETA_ROOT/Lullaby.component"
-          python scripts/auval.py "$BETA_ROOT/Lullaby.component"
+          python scripts/auval.py "$BETA_ROOT/Lullaby.component" --ci-refresh-registrar
 
   beta-packages:
     name: Collect validated private beta packages
@@ -232,7 +236,7 @@ jobs:
           python-version: '3.12.10'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: beta-*-${{ github.sha }}-${{ github.run_attempt }}
+          pattern: beta-*-${{ github.sha }}
           path: target/collected-beta
           digest-mismatch: error
       - name: Require all three packages and generate combined checksums

@@ -24,6 +24,13 @@ checks both Mach-O slices and code signatures, and runs CLAP/AU smoke tests plus
 `auval` natively on Intel. A final collection job requires all three packages and
 all preceding checks to pass.
 
+The AU validator stages and verifies the complete temporary component before
+publishing it atomically, then waits up to 60 seconds for discovery. CI explicitly
+enables a one-time refresh of only the runner user's AudioComponentRegistrar if
+that wait expires, followed by one bounded retry. Local/default validation never
+restarts the registrar, and no caches are deleted. A real validation failure
+still fails the job.
+
 The final `Lullaby-private-beta-<commit>-<attempt>` artifact contains the three
 ZIPs and combined `SHA256SUMS`. Download that artifact from the successful workflow
 run's **Artifacts** section. Per-platform artifacts are intermediate candidates;
@@ -31,6 +38,11 @@ a failed workflow has not produced an accepted beta. Artifacts expire after 30
 days, so retain an approved build and its checksums in controlled release storage.
 Private workflow artifact access requires repository access; these are not public
 customer download links.
+
+Per-platform artifact names stay stable within a workflow run, so retrying a
+failed validation job reuses the successful build's exact archive. Rerunning a
+build replaces only that platform's intermediate artifact; its receipt records
+the build attempt. The final collected artifact is named by the collection attempt.
 
 Each distribution contains complete plugin bundles, installation instructions,
 project/font/third-party notices, a dependency manifest, build provenance, and file

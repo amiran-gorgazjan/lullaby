@@ -1,9 +1,10 @@
 # Validation
 
 The accepted development baseline has been checked locally on **Apple Silicon
-macOS with Rust 1.95.0**. This record describes the scope of those checks;
-commercial beta packages still need testing on their target operating systems
-and in actual DAWs.
+macOS with Rust 1.95.0**. The [private beta workflow](beta-builds.md) also runs
+native automated checks on Windows x64, Linux x64, and both macOS architectures.
+This record describes their scope; actual DAW compatibility still needs manual
+testing of the distributed packages.
 
 ## Automated regression coverage
 
@@ -65,12 +66,22 @@ The editor has also been inspected in the development Cocoa CLAP host at its
 default and minimum sizes. Headless tests and editor-property checks do not
 replace sustained native editor interaction in a DAW.
 
+## Packaged beta checks
+
+Every platform build runs Rust regression tests, packaging/licensing guards and
+the native CLAP smoke test. macOS validation checks the universal binaries and
+signatures, runs native AU processing/state checks and strict `auval`, then repeats
+the native checks on Intel using the exact same ZIP built on Apple Silicon.
+The final collection step accepts packages only after these jobs pass. Consult
+the successful workflow run and each package's manifest for the actual source,
+tool versions, runner image and checksums.
+
 ## Remaining release validation
 
-Windows and Linux execution, Intel/universal macOS packages, commercial DAW
-compatibility, accessibility, full CLAP/VST3 validators and distribution signing
-need package-specific verification. The CI matrix provides build/test automation;
-a successful workflow is not proof of successful DAW installation or operation.
+Commercial DAW compatibility, accessibility, full CLAP/VST3 validators and
+distribution signing need package-specific verification. The CI matrix provides
+build/test automation; a successful workflow is not proof of successful DAW
+installation or operation.
 
 Rapid Detail and Detail-tilt automation can exceed the local deadline at 96 kHz,
 Ultra quality and 64-sample blocks. Larger buffers provided more headroom in the
