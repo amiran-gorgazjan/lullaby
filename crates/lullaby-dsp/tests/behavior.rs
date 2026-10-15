@@ -102,7 +102,7 @@ fn delta_plus_wet_reconstructs_dry() {
 }
 
 #[test]
-fn native_delta_scales_with_mix_wet_trim_and_output_gain() {
+fn delta_scales_with_mix_wet_trim_and_output_gain() {
     let s = Settings {
         depth: 10.0,
         phase: Phase::Linear,
@@ -330,9 +330,8 @@ fn hard_low_depth_preserves_bass_and_selects_absolute_high_frequency_activity() 
             }
         }
     }
-    // Independent native equal-tone probes give about .025 dB at 120 Hz and
-    // 4..5 dB above 4 kHz at Hard3. This guards the frequency distinction,
-    // rather than copying a fitted threshold or expecting complete parity.
+    // At low Depth, Hard mode should protect bass while reducing high peaks.
+    // Its absolute threshold should also respond to the input level.
     assert!(cuts[0][0][0] < 0.25, "low Depth overcuts bass: {cuts:?}");
     for tone in 2..5 {
         assert!(cuts[0][0][tone] > 2.0, "high peaks escape Hard3: {cuts:?}");
@@ -709,9 +708,8 @@ fn steady_external_resonance_has_smooth_minimum_phase_skirts() {
     let center = transfer(frequencies[1]);
     let above = transfer(frequencies[2]);
     let remote = transfer(frequencies[3]);
-    // Independent native held-key probes have broad audible skirts here,
-    // opposite phase below/above the cut and negligible far-away attenuation.
-    // These deliberately broad bounds guard musical behavior, not exact parity.
+    // A minimum-phase cut should have smooth skirts, opposite phase signs
+    // below/above its center, and little attenuation far from the center.
     assert!(
         below.0 > 0.25 && above.0 > 0.5,
         "skirts: {below:?}, {above:?}"

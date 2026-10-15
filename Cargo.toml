@@ -6,7 +6,8 @@ resolver = "2"
 name = "lullaby"
 version = "0.1.2"
 edition = "2024"
-license = "MIT"
+license-file = "LICENSE"
+publish = false
 description = "An independent adaptive resonance suppressor"
 
 [lib]

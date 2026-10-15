@@ -1,21 +1,21 @@
 #[path = "support/audio.rs"]
-#[allow(dead_code)]
 mod audio;
 #[path = "support/signals.rs"]
 mod signals;
-use audio::{Audio, VOCAL_BANDS, band_energy, energy, ratio_db, read_fixture, render};
+use audio::{Audio, band_energy, energy, ratio_db, render};
 use lullaby_dsp::{MAX_CUT_OFF, Phase, Quality, Settings};
 use signals::{musical_mix, peaking_eq};
 
 #[test]
-fn singing_eq_peak_receives_selective_reduction() {
-    let original = read_fixture("janice_singing_original.wav");
-    let resonant = read_fixture("janice_singing_resonance.wav");
-    let clean_bands = band_energy(&original, &VOCAL_BANDS);
-    let boosted_bands = band_energy(&resonant, &VOCAL_BANDS);
+fn generated_eq_peak_receives_selective_reduction_across_quality_and_phase() {
+    let original = musical_mix(2);
+    let resonant = peaking_eq(&original, 834.0, 18.0, 12.0);
+    let bands = [(790.0, 880.0), (180.0, 400.0)];
+    let clean_bands = band_energy(&original, &bands);
+    let boosted_bands = band_energy(&resonant, &bands);
     assert!(
         ratio_db(boosted_bands[0], clean_bands[0]) > 10.0,
-        "fixture must contain the added EQ peak"
+        "generated input must contain the added EQ peak"
     );
     for quality in [Quality::Normal, Quality::LowLatency] {
         for phase in [Phase::Minimum, Phase::Linear] {
@@ -27,8 +27,8 @@ fn singing_eq_peak_receives_selective_reduction() {
             };
             let clean_out = render(&original, settings);
             let boosted_out = render(&resonant, settings);
-            let clean_after = band_energy(&clean_out, &VOCAL_BANDS);
-            let boosted_after = band_energy(&boosted_out, &VOCAL_BANDS);
+            let clean_after = band_energy(&clean_out, &bands);
+            let boosted_after = band_energy(&boosted_out, &bands);
             let clean_cut = -ratio_db(clean_after[0], clean_bands[0]);
             let boosted_cut = -ratio_db(boosted_after[0], boosted_bands[0]);
             assert!(
@@ -36,10 +36,6 @@ fn singing_eq_peak_receives_selective_reduction() {
                 "18 dB EQ bump is escaping detection: {boosted_cut:.3} dB, {phase:?}"
             );
             assert!(
-                // A private normal-runtime Soothe3 probe at displayed Depth 6
-                // cuts this band 3.148 dB clean / 4.032 dB boosted. Requiring
-                // a full extra dB would reject the reference itself. Retain a
-                // useful positive differential as a broad musical regression.
                 boosted_cut > clean_cut + 0.1,
                 "added resonance should receive more reduction: clean {clean_cut:.3}, boosted {boosted_cut:.3}"
             );
@@ -54,7 +50,7 @@ fn singing_eq_peak_receives_selective_reduction() {
                     )),
                     energy(&original)
                 ) > -1.5,
-                "low-depth processing should preserve the original vocal"
+                "low-depth processing should preserve the original chord"
             );
             assert!(
                 (ratio_db(boosted_after[1], boosted_bands[1])
@@ -70,7 +66,7 @@ fn singing_eq_peak_receives_selective_reduction() {
                     ..settings
                 },
             );
-            let stronger_cut = -ratio_db(band_energy(&stronger, &VOCAL_BANDS)[0], boosted_bands[0]);
+            let stronger_cut = -ratio_db(band_energy(&stronger, &bands)[0], boosted_bands[0]);
             assert!(
                 stronger_cut > boosted_cut + 2.0,
                 "Depth should give useful extra suppression: {boosted_cut:.3} -> {stronger_cut:.3}"
@@ -114,10 +110,8 @@ fn boosting_a_quiet_gap_preserves_remote_notes_and_bounds_local_spread() {
     let clean_after = band_energy(&clean_output, &bands);
     for i in 0..bands.len() {
         let added_cut = ratio_db(after[i], before[i]) - ratio_db(clean_after[i], clean_before[i]);
-        // Exact licensed-native exports of these same Rust-generated inputs
-        // change the EQ region by -1.539 dB, and remote bass by +0.377 dB.
-        // The old 1 dB bound rejected the reference in the EQ region itself.
-        // Preserve the remote limit; permit useful smooth skirts near the EQ.
+        // Bound changes outside the EQ peak while allowing its smooth skirts
+        // to affect the nearby measurement band more than remote bass.
         let limit = if i == 0 { 2.0 } else { 1.0 };
         assert!(
             added_cut.abs() < limit,
@@ -259,9 +253,8 @@ fn pure_notes_and_a_boosted_fundamental_are_not_exempt() {
                 })
                 .collect(),
         };
-        // Reviewed Soothe3 case 05 removes 6.44 dB from a lone 1056 Hz
-        // sinusoid at Depth 10. The former preservation assertion contradicted
-        // that behavior. This general regression spans unrelated frequencies.
+        // High-depth suppression remains active on isolated tonal signals.
+        // Exercise several frequencies independently of the detector's meters.
         let mut output = render(
             &input,
             Settings {

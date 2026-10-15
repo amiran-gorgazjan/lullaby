@@ -264,9 +264,8 @@ impl LullabyParams {
     }
 }
 
-// Positive multipliers, with neutral 1x at the center of the knob. This
-// distribution approximates a logarithmic gesture; it does not claim native
-// normalized-position equivalence. The host's plain value is the multiplier.
+// Positive multipliers, with neutral 1x at the center of the knob. The gesture
+// is logarithmic; the host's plain value is the multiplier.
 fn multiplier_param(name: &'static str) -> FloatParam {
     FloatParam::new(name, 1.0, FloatRange::gain_range(-20.0, 20.0))
         .with_unit("x")

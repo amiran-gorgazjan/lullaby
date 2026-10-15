@@ -11,9 +11,8 @@ fn low_depth_remains_gentle_on_an_ordinary_harmonic_spectrum() {
             for phase in [Phase::Minimum, Phase::Linear] {
                 for quality in [Quality::Normal, Quality::LowLatency] {
                     let mut settings = factory_preset(0);
-                    // A low-depth usability guard, not an exact reference
-                    // measurement. Soothe3's measured high-depth saw response
-                    // rules out unconditional protection of musical harmonics.
+                    // Low Depth should preserve ordinary musical harmonics.
+                    // This guard does not exempt those harmonics at high Depth.
                     settings.depth = 3.0;
                     settings.phase = phase;
                     settings.quality = quality;

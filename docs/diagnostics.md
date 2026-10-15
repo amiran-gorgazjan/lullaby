@@ -1,10 +1,9 @@
 # Offline detector and filter diagnostics
 
-`lullaby-dsp` provides a small research Interface at the Engine seam behind the
-`research-trace` feature. Default DSP and plugin builds contain none of its state
-buffers, capture writes or accessors. This adds observability, not a new DSP model
-or an audio parity improvement. No reference audio or measured response tables
-are included.
+`lullaby-dsp` provides an offline diagnostic interface at the Engine seam behind
+the `dsp-diagnostics` feature. Default DSP and plugin builds contain none of its
+state buffers, capture writes or accessors. It exposes the engine's existing
+processing stages without changing the DSP model.
 
 Call `Engine::diagnostic_frame()` between sample calls to borrow the latest
 completed analysis frame. Access does not allocate or consume `take_frame_ready`.
@@ -15,13 +14,13 @@ the first subsequent frame replaces every exposed intermediate before it can be
 read. No historical frames or unbounded queue are stored.
 
 All positive-frequency bins include DC and Nyquist. The power prefix has one
-additional entry and uses the recorded detector peak for normalization. The Interface returns actual
+additional entry and uses the recorded detector peak for normalization. The interface returns actual
 detector magnitude/reference and actual normalized-power prefix, prominence/activity, requested cut before linking,
 linked cut, spread cut, weighted/capped target, smoothed reduction, and complex
 natural-log filter. Five absent intermediate arrays per channel are preallocated
 at construction; existing buffers are borrowed for the other stages. Activity is
 unitless; cuts are positive dB. Peak and activity floor are the actual scalar
-values used by the detector. No reconstruction is performed by the Interface.
+values used by the detector. No reconstruction is performed by the interface.
 
 The complex logarithm is captured after minimum-phase cepstral conversion (or
 before exponentiation for linear phase). `exp(log_filter)` reconstructs the
@@ -42,16 +41,15 @@ key routing. Bin `k` means `k * sample_rate / fft_size` Hz.
 ## Reusable bounded renderer/exporter
 
 Run the example with a JSON job. Input, key and output are interleaved **stereo
-f32 little-endian PCM**. Native reference-host probe files are planar and must
-be converted losslessly first (example below). Mono
-engines still use two values per input frame. Input files must have exactly the
+f32 little-endian PCM**. Mono engines still use two values per input frame.
+Input files must have exactly the
 requested number of frames. Output contains raw engine samples; append silence
 to inputs when an output tail is needed, and remove only declared latency when
 comparing aligned audio.
 
 ```sh
 CARGO_HOME="$PWD/.cache/cargo" cargo run --release --locked --offline \
-  -p lullaby-dsp --features research-trace --example diagnostic_trace -- job.json
+  -p lullaby-dsp --features dsp-diagnostics --example diagnostic_trace -- job.json
 ```
 
 ```json
@@ -90,22 +88,6 @@ Quality must stay fixed; changing it requires another engine/job. Optional
 Both output paths must be fresh: existing files (including hardlinks/symlinks
 to inputs) are rejected without truncation.
 
-For the existing planar host probes, this conversion only rearranges f32 bytes;
-it performs no numeric conversion, resampling or normalization. Preserve both
-source and converted hashes with the job. The inverse must match the source bytes.
-
-```python
-import numpy as np
-from pathlib import Path
-source = Path("input.pcm").read_bytes()
-planar = np.frombuffer(source, dtype="<u4").reshape(2, -1)
-interleaved = planar.T.copy().tobytes()
-assert np.frombuffer(interleaved, dtype="<u4").reshape(-1, 2).T.copy().tobytes() == source
-Path("main-interleaved.pcm").write_bytes(interleaved)
-# Repeat for the key. This offline conversion loads the file into memory;
-# the Rust renderer itself streams with bounded memory.
-```
-
 CSV rows contain frame/sample/channel attribution, requested frequency and actual
 nearest FFT bin frequency, and every exposed stage. Frequency selection never
 interpolates detector state. Row order is frame, channel, then requested frequency;
@@ -121,5 +103,5 @@ Bounds: at most 600 seconds of audio, 128 selected frequencies, 1,000,000 CSV ro
 frame are processed at a time; input/output streams and manifest storage live
 outside processing. File I/O and complex exponential reconstruction occur in the
 offline caller, after `process_sample` returns. Enabled processing and borrowed
-access remain allocation-free. This is an offline research tool, not a realtime
+access remain allocation-free. This is an offline diagnostic tool, not a realtime
 callback exporter or a DAW performance guarantee.

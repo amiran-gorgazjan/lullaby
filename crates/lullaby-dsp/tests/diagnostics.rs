@@ -1,4 +1,4 @@
-#![cfg(feature = "research-trace")]
+#![cfg(feature = "dsp-diagnostics")]
 use lullaby_dsp::{Engine, Phase, Quality, Settings, StereoMode};
 
 fn advance(engine: &mut Engine, samples: usize, same: bool) {

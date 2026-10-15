@@ -225,7 +225,7 @@ fn repeated_editor_creation_releases_owned_memory() {
 
 #[test]
 fn rotary_drag_keeps_coalesced_release_motion_and_balances_host_gestures() {
-    // Check both native reference coordinates and a host-scaled editor.
+    // Check both design coordinates and a host-scaled editor.
     for (scale, single_frame) in [(1.0, false), (0.625, false), (1.0, true), (0.625, true)] {
         let mut test = Harness::new(theme::SIZE * scale);
         let start = pos2(227.0 * scale, 370.0 * scale);

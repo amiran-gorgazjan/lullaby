@@ -1,16 +1,8 @@
 /target/
 /.cache/
 *.wav
-!/crates/lullaby-dsp/tests/fixtures/*.wav
 .DS_Store
-<<<<<<< Updated upstream
-||||||| Stash base
 __pycache__/
 *.pyc
 /ui_reference.png
-=======
-__pycache__/
-*.pyc
-/ui_reference.png
-/.local
->>>>>>> Stashed changes
+/.local/

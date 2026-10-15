@@ -1,3 +1,0 @@
-numpy==2.3.4
-# Optional, independent cross-host validation only:
-pedalboard==0.9.26

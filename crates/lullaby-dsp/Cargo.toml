@@ -2,15 +2,16 @@
 name = "lullaby-dsp"
 version = "0.1.2"
 edition = "2024"
-license = "MIT"
+license-file = "../../LICENSE"
+publish = false
 
 [features]
-# Offline research only: absent from the default plugin and DSP builds.
-research-trace = []
+# Offline Engine diagnostics: absent from default plugin and DSP builds.
+dsp-diagnostics = []
 
 [[example]]
 name = "diagnostic_trace"
-required-features = ["research-trace"]
+required-features = ["dsp-diagnostics"]
 
 [dependencies]
 rustfft = "6.4"

@@ -252,9 +252,8 @@ impl Settings {
         if has_pass {
             mask *= pass;
         }
-        // Independently modeled band sensitivity. Positive emphasis grows
-        // more gently than protection; native positive-depth probes reject
-        // treating each displayed unit as one dB of requested reduction.
+        // Positive emphasis grows more gently than protection. Band depth
+        // controls sensitivity rather than directly requesting reduction in dB.
         let sensitivity_db = if db > 0.0 { 0.5 * db } else { db };
         db_to_gain(sensitivity_db.clamp(-48.0, 36.0)) * mask * channel_focus(self.focus, channel)
     }

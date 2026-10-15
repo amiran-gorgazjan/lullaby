@@ -93,6 +93,8 @@ def main():
     resources = component / "Contents/Resources"
     resources.mkdir(exist_ok=True)
     notices = ["Lullaby AUv2 third-party notices", (ROOT / "LICENSE").read_text()]
+    notices += ["Previously distributed MIT baseline", (ROOT / "licenses/MIT-BASELINE.txt").read_text()]
+    shutil.copyfile(embedded / "Contents/Resources/LULLABY-LICENSES.txt", resources / "LULLABY-LICENSES.txt")
     notices += ["Interface fonts", (embedded / "Contents/Resources/FONT-LICENSES.txt").read_text()]
     for name, license_file in (("clap-wrapper", "LICENSE"), ("clap", "LICENSE"), ("AudioUnitSDK", "LICENSE.txt")):
         notices += [name, (cache / name / license_file).read_text()]

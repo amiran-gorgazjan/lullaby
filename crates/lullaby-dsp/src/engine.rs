@@ -23,7 +23,7 @@ impl Default for MeterFrame {
 }
 
 struct Channel {
-    #[cfg(feature = "research-trace")]
+    #[cfg(feature = "dsp-diagnostics")]
     trace: crate::diagnostics::TraceState,
     input: Vec<f32>,
     key: Vec<f32>,
@@ -42,7 +42,7 @@ struct Channel {
 impl Channel {
     fn new(n: usize) -> Self {
         Self {
-            #[cfg(feature = "research-trace")]
+            #[cfg(feature = "dsp-diagnostics")]
             trace: crate::diagnostics::TraceState::new(n / 2 + 1),
             input: vec![0.0; n],
             key: vec![0.0; n],
@@ -75,9 +75,9 @@ impl Channel {
 /// Weighted overlap-add FFT engine. Construction/reset/configuration happen outside processing.
 /// Sample calls perform no allocation, locking, I/O, or FFT planning.
 pub struct Engine {
-    #[cfg(feature = "research-trace")]
+    #[cfg(feature = "dsp-diagnostics")]
     trace_frames: u64,
-    #[cfg(feature = "research-trace")]
+    #[cfg(feature = "dsp-diagnostics")]
     trace_settings: Settings,
     sample_rate: f32,
     quality: Quality,
@@ -160,9 +160,9 @@ impl Engine {
         }
         spread_kernel_offsets.push(kernel_count);
         Self {
-            #[cfg(feature = "research-trace")]
+            #[cfg(feature = "dsp-diagnostics")]
             trace_frames: 0,
-            #[cfg(feature = "research-trace")]
+            #[cfg(feature = "dsp-diagnostics")]
             trace_settings: Settings::default(),
             sample_rate,
             quality,
@@ -233,8 +233,8 @@ impl Engine {
     }
 
     /// Borrow the latest actual analysis states; see `DiagnosticFrame` for the
-    /// timing, channel, reset, and lifetime contract. Only compiled for research.
-    #[cfg(feature = "research-trace")]
+    /// timing, channel, reset, and lifetime contract. Only compiled for diagnostics.
+    #[cfg(feature = "dsp-diagnostics")]
     pub fn diagnostic_frame(&self) -> Option<crate::DiagnosticFrame<'_>> {
         (self.trace_frames > 0).then(|| crate::DiagnosticFrame {
             frame_index: self.trace_frames,
@@ -278,7 +278,7 @@ impl Engine {
         self.cached = None;
         self.meter = MeterFrame::default();
         self.frame_ready = false;
-        #[cfg(feature = "research-trace")]
+        #[cfg(feature = "dsp-diagnostics")]
         {
             self.trace_frames = 0;
         }
@@ -315,12 +315,10 @@ impl Engine {
         let detail_tilt = s.detail_tilt.map(f32::log10);
         let attack_tilt = s.attack_tilt.map(f32::log10);
         let release_tilt = s.release_tilt.map(f32::log10);
-        // Independent render law, retained after the closer isolated-key
-        // time-constant hypothesis worsened the phase-sensitive corpus score.
+        // Map the unitless Attack control exponentially to an onset time.
         let attack_seconds = 0.0001 * 5000.0_f32.powf(s.attack / 10.0);
-        // Preserve the low/default range; independent native key-off captures
-        // support a shorter upper range than the inherited two-second endpoint.
-        // Edge delay and overshoot remain separate, unresolved behavior.
+        // Preserve the low/default range and shorten the upper Release range
+        // with a smooth transition above the midpoint.
         let upper_release = ((s.release - 5.0) / 5.0).clamp(0.0, 1.0);
         let upper_release = upper_release * upper_release * (3.0 - 2.0 * upper_release);
         let release_seconds =
@@ -436,9 +434,8 @@ impl Engine {
                 }
             }
             if depth_changed {
-                // Independent Hard-mode soft-knee threshold model. Equal-level
-                // native tone probes show much higher low-frequency thresholds,
-                // while Depth moves the threshold through absolute input levels.
+                // Hard-mode thresholds are higher at low frequencies;
+                // Depth shifts the threshold through absolute input levels.
                 let hard_frequency = (f / 1000.0).powf(1.1);
                 self.hard_threshold[k] =
                     -42.0 * hard_frequency / (1.0 + hard_frequency) + 8.0 * (3.0 - s.depth);
@@ -550,7 +547,7 @@ impl Engine {
     }
 
     fn render_frame(&mut self, s: &Settings) {
-        #[cfg(feature = "research-trace")]
+        #[cfg(feature = "dsp-diagnostics")]
         {
             self.trace_frames += 1;
             self.trace_settings = *s;
@@ -600,7 +597,7 @@ impl Engine {
         for ch in &mut self.channels {
             let peak = ch.magnitude_db.iter().copied().fold(-150.0_f32, f32::max);
             let floor = (peak - if s.mode == Mode::Soft { 40.0 } else { 60.0 }).max(-140.0);
-            #[cfg(feature = "research-trace")]
+            #[cfg(feature = "dsp-diagnostics")]
             {
                 ch.trace.peak = peak;
                 ch.trace.floor = floor;
@@ -643,7 +640,7 @@ impl Engine {
                 } else {
                     requested * activity * self.detail_strength[k]
                 };
-                #[cfg(feature = "research-trace")]
+                #[cfg(feature = "dsp-diagnostics")]
                 {
                     ch.trace.prominence[k] = prominence;
                     ch.trace.activity[k] = activity;
@@ -680,7 +677,7 @@ impl Engine {
                 } else {
                     self.release[k]
                 };
-                #[cfg(feature = "research-trace")]
+                #[cfg(feature = "dsp-diagnostics")]
                 {
                     ch.trace.spread[k] = spread;
                     ch.trace.target[k] = target;

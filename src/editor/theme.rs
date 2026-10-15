@@ -16,7 +16,7 @@ pub const PAPER: Color32 = Color32::from_rgb(232, 223, 208);
 pub const SAGE: Color32 = Color32::from_rgb(104, 116, 91);
 pub const CLAY: Color32 = Color32::from_rgb(181, 130, 103);
 
-/// All geometry lives in the reference's 1536×1024 coordinate system.
+/// All geometry lives in the editor's 1536×1024 design coordinate system.
 /// Fitting the canvas preserves spacing and circular controls on every host size.
 #[derive(Clone, Copy)]
 pub struct Canvas {

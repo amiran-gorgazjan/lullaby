@@ -44,7 +44,7 @@ pub struct DiagnosticChannel<'a> {
 /// Bin slices include DC and Nyquist (fft_size/2+1 entries); the power prefix
 /// contains one additional entry. Bin frequency is
 /// k*sample_rate/fft_size. All fields are measured actual engine states, not
-/// reconstructed from the output or inferred proprietary quantities.
+/// reconstructed from the output.
 pub struct DiagnosticFrame<'a> {
     pub frame_index: u64,
     pub input_end_sample: u64,

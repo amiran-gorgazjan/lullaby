@@ -8,12 +8,12 @@ pub(crate) struct SpectralReference {
 }
 
 impl SpectralReference {
-    #[cfg(feature = "research-trace")]
+    #[cfg(feature = "dsp-diagnostics")]
     pub fn values(&self) -> &[f32] {
         &self.reference
     }
 
-    #[cfg(feature = "research-trace")]
+    #[cfg(feature = "dsp-diagnostics")]
     pub fn normalized_power_prefix(&self) -> &[f64] {
         &self.power_sum
     }
@@ -38,8 +38,7 @@ impl SpectralReference {
             let lo = lower[k].min(k);
             let hi = upper[k].max(k + 1).min(db.len());
             let mean = (self.power_sum[hi] - self.power_sum[lo]) / (hi - lo) as f64;
-            // Global contrast calibration, independently chosen against the
-            // reviewed corpus; not a recovered proprietary envelope offset.
+            // Offset the local power baseline to set detector contrast.
             self.reference[k] = peak + (10.0 * mean.max(1e-15).log10()) as f32 - 2.0;
         }
         &self.reference
