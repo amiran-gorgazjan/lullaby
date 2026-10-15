@@ -8,6 +8,16 @@ pub(crate) struct SpectralReference {
 }
 
 impl SpectralReference {
+    #[cfg(feature = "research-trace")]
+    pub fn values(&self) -> &[f32] {
+        &self.reference
+    }
+
+    #[cfg(feature = "research-trace")]
+    pub fn normalized_power_prefix(&self) -> &[f64] {
+        &self.power_sum
+    }
+
     pub fn new(bins: usize) -> Self {
         Self {
             power_sum: vec![0.0; bins + 1],

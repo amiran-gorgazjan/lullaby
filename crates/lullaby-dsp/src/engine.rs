@@ -23,6 +23,8 @@ impl Default for MeterFrame {
 }
 
 struct Channel {
+    #[cfg(feature = "research-trace")]
+    trace: crate::diagnostics::TraceState,
     input: Vec<f32>,
     key: Vec<f32>,
     output: Vec<f32>,
@@ -40,6 +42,8 @@ struct Channel {
 impl Channel {
     fn new(n: usize) -> Self {
         Self {
+            #[cfg(feature = "research-trace")]
+            trace: crate::diagnostics::TraceState::new(n / 2 + 1),
             input: vec![0.0; n],
             key: vec![0.0; n],
             output: vec![0.0; n],
@@ -71,6 +75,10 @@ impl Channel {
 /// Weighted overlap-add FFT engine. Construction/reset/configuration happen outside processing.
 /// Sample calls perform no allocation, locking, I/O, or FFT planning.
 pub struct Engine {
+    #[cfg(feature = "research-trace")]
+    trace_frames: u64,
+    #[cfg(feature = "research-trace")]
+    trace_settings: Settings,
     sample_rate: f32,
     quality: Quality,
     channels: [Channel; 2],
@@ -152,6 +160,10 @@ impl Engine {
         }
         spread_kernel_offsets.push(kernel_count);
         Self {
+            #[cfg(feature = "research-trace")]
+            trace_frames: 0,
+            #[cfg(feature = "research-trace")]
+            trace_settings: Settings::default(),
             sample_rate,
             quality,
             channels: [Channel::new(n), Channel::new(n)],
@@ -220,6 +232,40 @@ impl Engine {
         std::mem::take(&mut self.frame_ready)
     }
 
+    /// Borrow the latest actual analysis states; see `DiagnosticFrame` for the
+    /// timing, channel, reset, and lifetime contract. Only compiled for research.
+    #[cfg(feature = "research-trace")]
+    pub fn diagnostic_frame(&self) -> Option<crate::DiagnosticFrame<'_>> {
+        (self.trace_frames > 0).then(|| crate::DiagnosticFrame {
+            frame_index: self.trace_frames,
+            input_end_sample: self.trace_frames * self.hop as u64,
+            valid_input_samples: (self.trace_frames * self.hop as u64).min(self.n as u64) as usize,
+            fft_size: self.n,
+            hop_size: self.hop,
+            sample_rate: self.sample_rate,
+            mono: self.mono,
+            settings: self.trace_settings,
+            channels: std::array::from_fn(|c| {
+                let ch = &self.channels[c];
+                crate::DiagnosticChannel {
+                    magnitude_db: &ch.magnitude_db,
+                    reference_db: ch.reference.values(),
+                    normalized_power_prefix: ch.reference.normalized_power_prefix(),
+                    prominence_db: &ch.trace.prominence,
+                    activity: &ch.trace.activity,
+                    requested_db: &ch.trace.requested,
+                    linked_db: &ch.requested,
+                    spread_db: &ch.trace.spread,
+                    target_db: &ch.trace.target,
+                    smoothed_db: &ch.reduction,
+                    log_filter: &ch.filter[..self.n / 2 + 1],
+                    peak_db: ch.trace.peak,
+                    activity_floor_db: ch.trace.floor,
+                }
+            }),
+        })
+    }
+
     pub fn reset(&mut self) {
         for c in &mut self.channels {
             c.reset();
@@ -232,6 +278,10 @@ impl Engine {
         self.cached = None;
         self.meter = MeterFrame::default();
         self.frame_ready = false;
+        #[cfg(feature = "research-trace")]
+        {
+            self.trace_frames = 0;
+        }
     }
 
     /// Call once per host block or automation segment, before `process_sample`.
@@ -242,9 +292,26 @@ impl Engine {
             return;
         }
         let first = self.cached.is_none();
+        // Invalidate only dependent coefficient groups. Recomputed values use
+        // the original arithmetic/order; automation is never deferred.
         let detail_changed = self
             .cached
             .is_none_or(|old| old.detail != s.detail || old.detail_tilt != s.detail_tilt);
+        let mode_changed = self.cached.is_none_or(|old| old.mode != s.mode);
+        let depth_changed = self.cached.is_none_or(|old| old.depth != s.depth);
+        let attack_changed = self
+            .cached
+            .is_none_or(|old| old.attack != s.attack || old.attack_tilt != s.attack_tilt);
+        let release_changed = self
+            .cached
+            .is_none_or(|old| old.release != s.release || old.release_tilt != s.release_tilt);
+        let bands_changed = self.cached.is_none_or(|old| old.bands != s.bands);
+        let weight_changed = bands_changed || self.cached.is_none_or(|old| old.focus != s.focus);
+        let audition_changed = bands_changed
+            || self
+                .cached
+                .is_none_or(|old| old.listen_band != s.listen_band);
+        let threshold_changed = detail_changed || mode_changed || depth_changed;
         let detail_tilt = s.detail_tilt.map(f32::log10);
         let attack_tilt = s.attack_tilt.map(f32::log10);
         let release_tilt = s.release_tilt.map(f32::log10);
@@ -278,21 +345,22 @@ impl Engine {
             let high = 1.0 / (1.0 + (2000.0 / f).powi(2));
             let tilt = |t: [f32; 2]| t[0] * low + t[1] * high;
             let detail = (s.detail / 10.0 + 0.5 * tilt(detail_tilt)).clamp(0.0, 1.0);
-            // Independently modeled Gaussian cut envelope in square-root
-            // frequency. Its absolute bandwidth grows with frequency while its
-            // relative bandwidth narrows; Detail controls concentration.
-            let spread_width = 1.0 + 9.0 * (1.0 - detail).powf(1.5);
-            let radius = 3.0 * spread_width;
-            let center = self.sqrt_frequency[k];
-            self.spread_lower[k] = (((center - radius).max(0.0).powi(2) * self.n as f32
-                / self.sample_rate)
-                .floor() as usize)
-                .max(1);
-            self.spread_upper[k] = (((center + radius).powi(2) * self.n as f32 / self.sample_rate)
-                .ceil() as usize
-                + 1)
-            .min(self.n / 2 + 1);
             if detail_changed {
+                // Independently modeled Gaussian cut envelope in square-root
+                // frequency. Its absolute bandwidth grows with frequency while its
+                // relative bandwidth narrows; Detail controls concentration.
+                let spread_width = 1.0 + 9.0 * (1.0 - detail).powf(1.5);
+                let radius = 3.0 * spread_width;
+                let center = self.sqrt_frequency[k];
+                self.spread_lower[k] = (((center - radius).max(0.0).powi(2) * self.n as f32
+                    / self.sample_rate)
+                    .floor() as usize)
+                    .max(1);
+                self.spread_upper[k] = (((center + radius).powi(2) * self.n as f32
+                    / self.sample_rate)
+                    .ceil() as usize
+                    + 1)
+                .min(self.n / 2 + 1);
                 let inverse_width = 1.0 / spread_width;
                 let range = self.spread_lower[k]..self.spread_upper[k];
                 if shared_width.is_none() {
@@ -332,56 +400,75 @@ impl Engine {
                     *weight = scale * exponent.exp();
                 }
             }
-            self.detail_strength[k] =
-                ((detail - 0.5) * if detail < 0.5 { 1.085 } else { 2.918 }).exp2();
-            // Independent Soft-mode sensitivity hypothesis from isolated
-            // equal-level tones: a broad presence emphasis, not a fixed audio
-            // EQ. It still acts only on detected contrast and active bins.
-            if s.mode == Mode::Soft {
-                let presence = (f / 2500.0).powi(4);
-                self.detail_strength[k] *=
-                    1.0 + presence / (1.0 + presence) / (1.0 + (f / 7000.0).powi(3));
+            if detail_changed || mode_changed {
+                self.detail_strength[k] =
+                    ((detail - 0.5) * if detail < 0.5 { 1.085 } else { 2.918 }).exp2();
+                // Independent Soft-mode sensitivity hypothesis from isolated
+                // equal-level tones: a broad presence emphasis, not a fixed audio
+                // EQ. It still acts only on detected contrast and active bins.
+                if s.mode == Mode::Soft {
+                    let presence = (f / 2500.0).powi(4);
+                    self.detail_strength[k] *=
+                        1.0 + presence / (1.0 + presence) / (1.0 + (f / 7000.0).powi(3));
+                }
             }
-            let extent = (1.25 - 0.5 * detail).exp2();
-            self.reference_lower[k] = (k as f32 / extent).floor() as usize;
-            self.reference_upper[k] = ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
-            // A lone peak's mean-power contrast depends on bin density. Keep
-            // the smaller low-latency transform on a comparable contrast scale
-            // while leaving a flat/noise-like spectrum close to zero contrast.
-            let count = (self.reference_upper[k] - self.reference_lower[k]).max(2) as f32;
-            self.contrast_scale[k] =
-                ((count * 2048.0 / self.n as f32).ln() / count.ln()).clamp(1.0, 2.0);
-            // Detail tilt affects contrast selection as well as bandwidth.
-            // Higher depth gradually admits less prominent spectral features.
-            self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
-            // Low Depth excludes weaker contrast rather than merely scaling
-            // every detected feature down. Independent smooth calibration;
-            // At 10 the previous high-depth selection is unchanged.
-            if s.mode == Mode::Soft {
-                self.threshold[k] += 3.0 * (10.0 - s.depth) / (s.depth + 1.0);
+            if detail_changed {
+                let extent = (1.25 - 0.5 * detail).exp2();
+                self.reference_lower[k] = (k as f32 / extent).floor() as usize;
+                self.reference_upper[k] =
+                    ((k as f32 * extent).ceil() as usize + 1).min(self.n / 2 + 1);
+                // A lone peak's mean-power contrast depends on bin density. Keep
+                // the smaller low-latency transform on a comparable contrast scale
+                // while leaving a flat/noise-like spectrum close to zero contrast.
+                let count = (self.reference_upper[k] - self.reference_lower[k]).max(2) as f32;
+                self.contrast_scale[k] =
+                    ((count * 2048.0 / self.n as f32).ln() / count.ln()).clamp(1.0, 2.0);
             }
-            // Independent Hard-mode soft-knee threshold model. Equal-level
-            // native tone probes show much higher low-frequency thresholds,
-            // while Depth moves the threshold through absolute input levels.
-            let hard_frequency = (f / 1000.0).powf(1.1);
-            self.hard_threshold[k] =
-                -42.0 * hard_frequency / (1.0 + hard_frequency) + 8.0 * (3.0 - s.depth);
-            // Mild frequency-dependent response, independently tilted at either end.
-            let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
-            let coefficient = |seconds: f32, t: [f32; 2]| {
-                let seconds = (seconds * frequency_scale * 10.0_f32.powf(tilt(t))).max(0.0001);
-                (-(self.hop as f32) / (self.sample_rate * seconds)).exp()
-            };
-            self.attack[k] = coefficient(attack_seconds, attack_tilt);
-            self.release[k] = coefficient(release_seconds, release_tilt);
-            for c in 0..2 {
-                self.channels[c].weight[k] = s.weight(f, c);
+            if threshold_changed {
+                // Detail tilt affects contrast selection as well as bandwidth.
+                // Higher depth gradually admits less prominent spectral features.
+                self.threshold[k] = (5.0 - 2.0 * detail - (s.depth - 6.0).max(0.0) * 0.15).max(0.5);
+                // Low Depth excludes weaker contrast rather than merely scaling
+                // every detected feature down. Independent smooth calibration;
+                // At 10 the previous high-depth selection is unchanged.
+                if s.mode == Mode::Soft {
+                    self.threshold[k] += 3.0 * (10.0 - s.depth) / (s.depth + 1.0);
+                }
             }
-            self.audition_mask[k] = if s.listen_band >= 0 {
-                s.bands[s.listen_band as usize].response(f).abs()
-            } else {
-                0.0
-            };
+            if depth_changed {
+                // Independent Hard-mode soft-knee threshold model. Equal-level
+                // native tone probes show much higher low-frequency thresholds,
+                // while Depth moves the threshold through absolute input levels.
+                let hard_frequency = (f / 1000.0).powf(1.1);
+                self.hard_threshold[k] =
+                    -42.0 * hard_frequency / (1.0 + hard_frequency) + 8.0 * (3.0 - s.depth);
+            }
+            if attack_changed || release_changed {
+                // Mild frequency-dependent response, independently tilted at either end.
+                let frequency_scale = (1000.0 / f).powf(0.15).clamp(0.5, 2.0);
+                let coefficient = |seconds: f32, t: [f32; 2]| {
+                    let seconds = (seconds * frequency_scale * 10.0_f32.powf(tilt(t))).max(0.0001);
+                    (-(self.hop as f32) / (self.sample_rate * seconds)).exp()
+                };
+                if attack_changed {
+                    self.attack[k] = coefficient(attack_seconds, attack_tilt);
+                }
+                if release_changed {
+                    self.release[k] = coefficient(release_seconds, release_tilt);
+                }
+            }
+            if weight_changed {
+                for c in 0..2 {
+                    self.channels[c].weight[k] = s.weight(f, c);
+                }
+            }
+            if audition_changed {
+                self.audition_mask[k] = if s.listen_band >= 0 {
+                    s.bands[s.listen_band as usize].response(f).abs()
+                } else {
+                    0.0
+                };
+            }
         }
         self.target_trim = db_to_gain(s.wet_trim_db);
         self.target_gain = db_to_gain(s.output_db);
@@ -463,6 +550,11 @@ impl Engine {
     }
 
     fn render_frame(&mut self, s: &Settings) {
+        #[cfg(feature = "research-trace")]
+        {
+            self.trace_frames += 1;
+            self.trace_settings = *s;
+        }
         let bins = self.n / 2 + 1;
         let mid_side = s.stereo_mode == StereoMode::MidSide && !self.mono;
         let norm = 2.0 / self.window.iter().sum::<f32>();
@@ -508,6 +600,11 @@ impl Engine {
         for ch in &mut self.channels {
             let peak = ch.magnitude_db.iter().copied().fold(-150.0_f32, f32::max);
             let floor = (peak - if s.mode == Mode::Soft { 40.0 } else { 60.0 }).max(-140.0);
+            #[cfg(feature = "research-trace")]
+            {
+                ch.trace.peak = peak;
+                ch.trace.floor = floor;
+            }
             let reference = ch.reference.analyze(
                 &ch.magnitude_db,
                 &self.reference_lower,
@@ -546,6 +643,12 @@ impl Engine {
                 } else {
                     requested * activity * self.detail_strength[k]
                 };
+                #[cfg(feature = "research-trace")]
+                {
+                    ch.trace.prominence[k] = prominence;
+                    ch.trace.activity[k] = activity;
+                    ch.trace.requested[k] = ch.requested[k];
+                }
             }
         }
         // Full linking preserves the stronger independently requested cut in
@@ -577,6 +680,11 @@ impl Engine {
                 } else {
                     self.release[k]
                 };
+                #[cfg(feature = "research-trace")]
+                {
+                    ch.trace.spread[k] = spread;
+                    ch.trace.target[k] = target;
+                }
                 ch.reduction[k] = s.limit_reduction(target + a * (ch.reduction[k] - target));
                 self.meter.peak_reduction_db = self.meter.peak_reduction_db.max(ch.reduction[k]);
                 ch.filter[k] =
@@ -660,5 +768,102 @@ fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [
         *peak = 0.5 * (source + (source * source + 2.0 * width * width).sqrt());
         let distance = (*peak - source) * inverse_width;
         *squared = distance * distance;
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn alternating_controls_match_forced_full_coefficient_rebuilds() {
+        for quality in [Quality::LowLatency, Quality::Normal, Quality::Ultra] {
+            let mut cached = Engine::new(96000.0, quality, false);
+            let mut rebuilt = Engine::new(96000.0, quality, false);
+            let mut s = Settings {
+                quality,
+                external_sidechain: true,
+                ..Default::default()
+            };
+            for i in 0..16000 {
+                if i % 83 == 0 {
+                    let j = i / 83;
+                    let p = (j % 11) as f32;
+                    match j % 16 {
+                        0 => s.depth = p,
+                        1 => s.detail = p,
+                        2 => s.detail_tilt = [0.1 + p * 0.8, 10.0 - p * 0.8],
+                        3 => {
+                            s.mode = if s.mode == Mode::Soft {
+                                Mode::Hard
+                            } else {
+                                Mode::Soft
+                            }
+                        }
+                        4 => s.attack = p,
+                        5 => s.release = p,
+                        6 => s.attack_tilt = [0.1 + p * 0.8, 10.0],
+                        7 => s.release_tilt = [10.0, 0.1 + p * 0.8],
+                        8 => s.focus = p / 5.0 - 1.0,
+                        9 => {
+                            s.bands[0] =
+                                crate::Band::bell(120.0 + p * 1200.0, p - 5.0, 0.3 + p * 0.2)
+                        }
+                        10 => s.listen_band = if s.listen_band == -1 { 0 } else { -1 },
+                        11 => {
+                            s.phase = if s.phase == Phase::Minimum {
+                                Phase::Linear
+                            } else {
+                                Phase::Minimum
+                            }
+                        }
+                        12 => s.mix = p / 10.0,
+                        13 => s.max_cut_db = p,
+                        14 => {
+                            s.stereo_mode = if s.stereo_mode == StereoMode::LeftRight {
+                                StereoMode::MidSide
+                            } else {
+                                StereoMode::LeftRight
+                            }
+                        }
+                        _ => {
+                            cached.reset();
+                            rebuilt.reset();
+                        }
+                    }
+                    if let Some(mut old) = rebuilt.cached {
+                        // Force every coefficient group dirty without resetting
+                        // audio or control smoothing state. No math is duplicated.
+                        old.detail = -1.0;
+                        old.depth = -1.0;
+                        old.mode = if s.mode == Mode::Soft {
+                            Mode::Hard
+                        } else {
+                            Mode::Soft
+                        };
+                        old.attack = -1.0;
+                        old.release = -1.0;
+                        old.focus = -2.0;
+                        old.bands[0].frequency = -1.0;
+                        old.listen_band = -2;
+                        rebuilt.cached = Some(old);
+                    }
+                    cached.set_settings(s);
+                    rebuilt.set_settings(s);
+                }
+                let x = [
+                    (i as f32 * 0.031).sin() * 0.3,
+                    (i as f32 * 0.137).sin() * 0.1,
+                ];
+                assert_eq!(
+                    cached.process_sample(x, [x[1], x[0]]).map(f32::to_bits),
+                    rebuilt.process_sample(x, [x[1], x[0]]).map(f32::to_bits)
+                );
+                assert_eq!(
+                    cached.meter().peak_reduction_db.to_bits(),
+                    rebuilt.meter().peak_reduction_db.to_bits()
+                );
+            }
+        }
     }
 }

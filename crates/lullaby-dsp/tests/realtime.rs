@@ -65,6 +65,10 @@ fn audio_and_automation_never_allocate_or_free() {
         let value = (i as f32 * 0.21).sin() * 0.3;
         let output = engine.process_sample([value; 2], [value; 2]);
         assert!(output.iter().all(|x| x.is_finite()));
+        #[cfg(feature = "research-trace")]
+        if let Some(frame) = engine.diagnostic_frame() {
+            assert_eq!(frame.channels[0].target_db.len(), frame.fft_size / 2 + 1);
+        }
     }
     engine.reset();
     TRACK.with(|c| c.set(false));
