@@ -7,6 +7,7 @@ import ctypes
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -110,22 +111,27 @@ def require_ci_refresh():
 
 
 def refresh_ci_registrar():
-    """Explicit CI-only fallback; never signal other users or delete caches."""
+    """Restart only this CI user's launchd service and verify a new process."""
     require_ci_refresh()
-    import pwd
     uid = os.getuid()
-    account = pwd.getpwuid(uid).pw_name
-    # Darwin killall matches this process name exactly unless -m is supplied;
-    # -u limits it to the current account. pkill's short-name matching silently
-    # fails for names longer than 19 characters, including this registrar.
-    result = subprocess.run(["killall", "-u", account, "AudioComponentRegistrar"],
+    service = f"gui/{uid}/com.apple.audio.AudioComponentRegistrar"
+    previous = subprocess.run(["launchctl", "print", service],
+                              capture_output=True, text=True, check=False, timeout=10)
+    match = re.search(r"^\s*pid = ([1-9][0-9]*)\s*$", previous.stdout, re.MULTILINE) if previous.returncode == 0 else None
+    old_pid = int(match.group(1)) if match else None
+    # SIGTERM can leave the registrar running with outstanding transactions.
+    # kickstart -k forces a real restart; -p reports the replacement PID. The
+    # GUI-domain target excludes root and other users' registrars.
+    result = subprocess.run(["launchctl", "kickstart", "-kp", service],
                             capture_output=True, text=True, check=False, timeout=10)
-    print(f"CI-only registrar refresh for UID {uid}: exit {result.returncode}; "
-          f"{result.stderr.strip() or result.stdout.strip() or '<no output>'}", flush=True)
-    # Darwin killall uses 1 when no matching process exists. In that case a new
-    # listing can start the service; the second discovery wait is still bounded.
-    if result.returncode not in (0, 1):
-        raise RuntimeError("CI registrar refresh failed: " + result.stderr.strip())
+    if result.returncode != 0:
+        raise RuntimeError(f"CI registrar restart failed (exit {result.returncode}): {result.stderr.strip()[:2000]}")
+    if not re.fullmatch(r"[1-9][0-9]*", result.stdout.strip()):
+        raise RuntimeError("CI registrar restart did not report a valid process ID")
+    new_pid = int(result.stdout.strip())
+    if new_pid == old_pid:
+        raise RuntimeError(f"CI registrar restart left the same process running: {new_pid}")
+    print(f"CI-only registrar restart for UID {uid}: PID {old_pid or '<not running>'} -> {new_pid}", flush=True)
 
 
 def validate(source, destination, discovery_timeout=60.0, ci_refresh_registrar=False):
@@ -162,7 +168,7 @@ def main():
     destination = Path.home() / "Library/Audio/Plug-Ins/Components/Lullaby.component"
     try:
         return validate(source, destination, args.discovery_timeout, args.ci_refresh_registrar)
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, str(error) + "\n")
 
 

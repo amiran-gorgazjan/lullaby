@@ -27,9 +27,11 @@ all preceding checks to pass.
 The AU validator stages and verifies the complete temporary component before
 publishing it atomically, then waits up to 60 seconds for discovery. CI explicitly
 enables a one-time refresh of only the runner user's AudioComponentRegistrar if
-that wait expires, followed by one bounded retry. Local/default validation never
-restarts the registrar, and no caches are deleted. A real validation failure
-still fails the job.
+that wait expires, followed by one bounded retry. It uses `launchctl kickstart -kp`
+against the current UID's GUI service and verifies a replacement process ID:
+SIGTERM alone can leave the old registrar running with outstanding transactions.
+Local/default validation never restarts the registrar, and no caches are deleted.
+A real validation failure still fails the job.
 
 The final `Lullaby-private-beta-<commit>-<attempt>` artifact contains the three
 ZIPs and combined `SHA256SUMS`. Download that artifact from the successful workflow

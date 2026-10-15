@@ -16,13 +16,16 @@ output.mkdir(parents=True, exist_ok=True)
 
 
 def command(label, args, timeout=20):
+    status = None
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+        status = result.returncode
         text = f"{args!r}\nexit={result.returncode}\n{result.stdout}\n{result.stderr}"
     except subprocess.TimeoutExpired as error:
         text = f"{args!r}\nTIMED OUT\n{error.stdout!r}\n{error.stderr!r}"
     (output / (label + ".txt")).write_text(text)
     print(label + ":\n" + text[-16000:], flush=True)
+    return status
 
 
 def snapshot(label, destination):
@@ -48,7 +51,9 @@ def attempt(label, mutation=None):
         mutation()
     try:
         auval.wait_for_discovery(15)
-        command(label + "-strict", ["auval", "-v", *auval.IDENTITY, "-strict"], timeout=90)
+        status = command(label + "-strict", ["auval", "-v", *auval.IDENTITY, "-strict"], timeout=90)
+        if status != 0:
+            raise RuntimeError(f"Strict auval failed: {status}")
         results.append({"attempt": label, "discovered": True})
         return True
     except auval.DiscoveryTimeout as error:
@@ -58,25 +63,14 @@ def attempt(label, mutation=None):
         return False
 
 
-def touch_metadata():
-    for path in (destination / "Contents/Info.plist", destination / "Contents", destination, destination.parent):
-        os.utime(path, None)
-
-
 with auval.temporary_component(source, destination):
     snapshot("installed", destination)
     success = attempt("baseline")
     if not success:
-        success = attempt("metadata-touch", touch_metadata)
-    if not success:
-        success = attempt("current-user-refresh", auval.refresh_ci_registrar)
-    if not success:
-        tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-        success = attempt("explicit-bundle-registration", lambda: command("lsregister", [tool, "-f", str(destination)]))
-    if not success:
-        service = f"gui/{os.getuid()}/com.apple.audio.AudioComponentRegistrar"
-        success = attempt("launchd-restart", lambda: command("launchd-kickstart", ["launchctl", "kickstart", "-kp", service]))
+        success = attempt("production-refresh", auval.refresh_ci_registrar)
     snapshot("finished", destination)
     command("registrar-logs", ["log", "show", "--last", "10m", "--style", "compact", "--info", "--debug", "--predicate", 'process == "AudioComponentRegistrar" OR process == "auvaltool"'], timeout=30)
 (output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
 print(json.dumps(results), flush=True)
+if not success:
+    raise RuntimeError("The production fallback did not discover the Audio Unit")

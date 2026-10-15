@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -292,25 +291,79 @@ class CiRegistrarRefreshTests(unittest.TestCase):
                 auval.validate(Path("source"), Path("destination"), ci_refresh_registrar=True)
             install.assert_not_called()
 
-    def test_refresh_command_targets_only_exact_registrar_and_current_uid_account(self):
-        lookup = Mock(return_value=SimpleNamespace(pw_name="isolated-runner"))
+    def test_refresh_command_targets_only_current_uid_gui_service_and_verifies_new_pid(self):
+        results = [subprocess.CompletedProcess([], 0, "service = {\n\tpid = 469\n}\n", ""),
+                   subprocess.CompletedProcess([], 0, "3171\n", "")]
         with patch("auval.sys.platform", "darwin"), patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), \
                 patch("auval.os.getuid", return_value=501, create=True), \
-                patch.dict(sys.modules, {"pwd": SimpleNamespace(getpwuid=lookup)}), \
-                patch("auval.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run, \
-                patch("sys.stdout", new_callable=io.StringIO):
+                patch("auval.subprocess.run", side_effect=results) as run, \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
             auval.refresh_ci_registrar()
-        lookup.assert_called_once_with(501)
-        run.assert_called_once_with(["killall", "-u", "isolated-runner", "AudioComponentRegistrar"],
-                                    capture_output=True, text=True, check=False, timeout=10)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            ["launchctl", "print", "gui/501/com.apple.audio.AudioComponentRegistrar"],
+            ["launchctl", "kickstart", "-kp", "gui/501/com.apple.audio.AudioComponentRegistrar"],
+        ])
+        self.assertTrue(all(call.kwargs == dict(capture_output=True, text=True, check=False, timeout=10)
+                            for call in run.call_args_list))
+        self.assertIn("UID 501: PID 469 -> 3171", output.getvalue())
 
-    def test_no_matching_registrar_still_allows_bounded_rediscovery(self):
+    def test_service_not_running_can_be_started_with_a_valid_pid(self):
+        for previous in (subprocess.CompletedProcess([], 1, "", "service not found"),
+                         subprocess.CompletedProcess([], 0, "state = not running\n", "")):
+            with self.subTest(previous=previous), patch("auval.require_ci_refresh"), \
+                    patch("auval.os.getuid", return_value=501, create=True), \
+                    patch("auval.subprocess.run", side_effect=[previous, subprocess.CompletedProcess([], 0, "3171\n", "")]), \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                auval.refresh_ci_registrar()
+            self.assertIn("<not running> -> 3171", output.getvalue())
+
+    def test_same_pid_is_rejected_even_when_launchctl_reports_success(self):
         with patch("auval.require_ci_refresh"), \
                 patch("auval.os.getuid", return_value=501, create=True), \
-                patch.dict(sys.modules, {"pwd": SimpleNamespace(getpwuid=lambda _: SimpleNamespace(pw_name="runner"))}), \
-                patch("auval.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", "no matching process")), \
-                patch("sys.stdout", new_callable=io.StringIO):
+                patch("auval.subprocess.run", side_effect=[subprocess.CompletedProcess([], 0, "pid = 469\n", ""),
+                                                         subprocess.CompletedProcess([], 0, "469\n", "")]), \
+                self.assertRaisesRegex(RuntimeError, "same process"):
             auval.refresh_ci_registrar()
+
+    def test_invalid_replacement_pid_is_rejected(self):
+        for pid in ("", "0", "-1", "3171 extra", "1\n2"):
+            with self.subTest(pid=pid), patch("auval.require_ci_refresh"), \
+                    patch("auval.os.getuid", return_value=501, create=True), \
+                    patch("auval.subprocess.run", side_effect=[subprocess.CompletedProcess([], 1, "", ""),
+                                                             subprocess.CompletedProcess([], 0, pid, "")]), \
+                    self.assertRaisesRegex(RuntimeError, "valid process ID"):
+                auval.refresh_ci_registrar()
+
+    def test_failed_restart_is_rejected_even_if_stdout_looks_like_a_pid(self):
+        with patch("auval.require_ci_refresh"), \
+                patch("auval.os.getuid", return_value=501, create=True), \
+                patch("auval.subprocess.run", side_effect=[subprocess.CompletedProcess([], 0, "pid = 469\n", ""),
+                                                         subprocess.CompletedProcess([], 5, "3171\n", "access denied")]), \
+                self.assertRaisesRegex(RuntimeError, "exit 5.*access denied"):
+            auval.refresh_ci_registrar()
+
+    def test_launchctl_commands_have_bounded_timeouts(self):
+        for failed_command in (0, 1):
+            results = [subprocess.CompletedProcess([], 0, "pid = 469\n", "")] * failed_command
+            results.append(subprocess.TimeoutExpired("launchctl", 10))
+            with self.subTest(failed_command=failed_command), patch("auval.require_ci_refresh"), \
+                    patch("auval.os.getuid", return_value=501, create=True), \
+                    patch("auval.subprocess.run", side_effect=results) as run, \
+                    self.assertRaises(subprocess.TimeoutExpired):
+                auval.refresh_ci_registrar()
+            self.assertEqual(run.call_count, failed_command + 1)
+            self.assertTrue(all(call.kwargs["timeout"] == 10 for call in run.call_args_list))
+
+    def test_refresh_failure_cleans_installation_without_retrying_validation(self):
+        with patch("auval.require_ci_refresh"), patch("auval.temporary_component") as install, \
+                patch("auval.wait_for_discovery", side_effect=auval.DiscoveryTimeout("first")) as wait, \
+                patch("auval.refresh_ci_registrar", side_effect=subprocess.TimeoutExpired("launchctl", 10)), \
+                patch("auval.subprocess.run") as run, patch("sys.stdout", new_callable=io.StringIO), \
+                self.assertRaises(subprocess.TimeoutExpired):
+            auval.validate(Path("source"), Path("destination"), 12, True)
+        wait.assert_called_once_with(12)
+        install.return_value.__exit__.assert_called_once()
+        run.assert_not_called()
 
     def test_initial_discovery_success_never_refreshes_registrar(self):
         with patch("auval.require_ci_refresh"), patch("auval.temporary_component"), \
