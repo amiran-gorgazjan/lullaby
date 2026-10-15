@@ -26,7 +26,9 @@ pub fn show(
     let center = c.p(knob.center[0], knob.center[1]);
     let radius = if knob.large { 126.0 } else { 52.0 } * c.scale;
     let hit = Rect::from_center_size(center, Vec2::splat(radius * 2.35));
-    let id = ui.id().with(knob.param as *const FloatParam as usize);
+    // Stable identities also keep egui's debug ID source cache bounded across
+    // editor lifetimes; parameter heap addresses change between instances.
+    let id = ui.id().with(("knob", knob.param.name()));
     let mut response = ui.interact(hit, id, Sense::click_and_drag());
     response.widget_info(|| egui::WidgetInfo::slider(true, knob.param.value() as f64, knob.label));
     let drag_id = id.with("drag");

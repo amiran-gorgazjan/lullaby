@@ -186,27 +186,29 @@ impl LullabyEditor {
                         }
                     });
                     let band = &params.bands[self.selected];
-                    ui.horizontal(|ui| {
-                        toggle(ui, &band.enabled, setter, "Enabled");
-                        choice(ui, &band.shape, setter, &[
-                            "Bell", "Low shelf", "High shelf", "Low cut", "High cut", "Bandpass", "Reject", "Tilt",
-                        ]);
-                        let listen = params.listen_band.value() == self.selected as i32;
-                        if ui.selectable_label(listen, "Audition Δ").clicked() {
-                            set(setter, &params.listen_band, if listen { -1 } else { self.selected as i32 });
-                        }
-                        if ui.button("Remove").clicked() {
-                            set(setter, &band.enabled, false);
-                            if listen { set(setter, &params.listen_band, -1); }
-                        }
-                    });
-                    ui.columns(2, |cols| {
-                        for p in [&band.frequency, &band.depth_db] {
-                            slider(&mut cols[0], p, setter);
-                        }
-                        for p in [&band.width, &band.focus] {
-                            slider(&mut cols[1], p, setter);
-                        }
+                    ui.push_id(("band_editor", self.selected), |ui| {
+                        ui.horizontal(|ui| {
+                            toggle(ui, &band.enabled, setter, "Enabled");
+                            choice(ui, &band.shape, setter, &[
+                                "Bell", "Low shelf", "High shelf", "Low cut", "High cut", "Bandpass", "Reject", "Tilt",
+                            ]);
+                            let listen = params.listen_band.value() == self.selected as i32;
+                            if ui.selectable_label(listen, "Audition Δ").clicked() {
+                                set(setter, &params.listen_band, if listen { -1 } else { self.selected as i32 });
+                            }
+                            if ui.button("Remove").clicked() {
+                                set(setter, &band.enabled, false);
+                                if listen { set(setter, &params.listen_band, -1); }
+                            }
+                        });
+                        ui.columns(2, |cols| {
+                            for p in [&band.frequency, &band.depth_db] {
+                                slider(&mut cols[0], p, setter);
+                            }
+                            for p in [&band.width, &band.focus] {
+                                slider(&mut cols[1], p, setter);
+                            }
+                        });
                     });
                     ui.label(RichText::new("Double-click the graph to add a band. Drag a node to shape it; scroll to change width.").small());
                 });
@@ -222,7 +224,7 @@ fn toggle(ui: &mut egui::Ui, param: &BoolParam, setter: &ParamSetter, label: &st
     }
 }
 fn choice(ui: &mut egui::Ui, param: &IntParam, setter: &ParamSetter, options: &[&str]) {
-    egui::ComboBox::from_id_salt(param as *const _ as usize)
+    egui::ComboBox::from_id_salt(("choice", param.name()))
         .selected_text(options[param.value() as usize])
         .show_ui(ui, |ui| {
             for (i, option) in options.iter().enumerate() {

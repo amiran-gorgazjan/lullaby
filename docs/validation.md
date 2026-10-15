@@ -29,13 +29,16 @@ repeated editor creation/destruction and repeated VST3 instance lifecycles with
 bounded live Rust heap usage. They do not measure all native window/GPU resources
 or establish a cause for a host-specific memory spike.
 
-A Linux CI run that enabled offline DSP instrumentation throughout the plugin
-reported 87,425 bytes of retained thread-local allocation balance after 48 editor
-creations, above the 64 KiB guard. The preceding default-feature run passed the
-same guard. This variability remains a follow-up investigation; it is not evidence
-of an identified plugin leak or a resolved memory issue. The beta ships without
-that instrumentation. CI retains default plugin memory checks and tests optional
-instrumentation separately at the DSP boundary.
+Beta preparation caught intermittent teardown guard failures on Linux and macOS.
+The cause was egui's debug-only global ID source map retaining diagnostic strings
+for widget IDs derived from parameter heap addresses. A controlled actual-editor
+test with 48 distinct parameter sets retained 446,160 bytes before the fix.
+Widget IDs now use stable parameter names within their UI and band scopes. The
+regression deliberately keeps parameter addresses distinct, in addition to the
+original teardown test; both retain the unchanged 64 KiB bound. Controlled release
+build probes did not show this debug-map retention. This finding does not establish
+a cause for the earlier unconfirmed memory spike in FL Studio, nor does it replace
+native window/GPU testing.
 
 Test inputs are generated in code. No external recordings are required or included.
 

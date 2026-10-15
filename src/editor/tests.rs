@@ -52,7 +52,9 @@ struct Harness {
 }
 impl Harness {
     fn new(size: Vec2) -> Self {
-        let params = Arc::new(LullabyParams::default());
+        Self::with_params(size, Arc::new(LullabyParams::default()))
+    }
+    fn with_params(size: Vec2, params: Arc<LullabyParams>) -> Self {
         let host = Arc::new(Host {
             params: params.clone(),
             events: Mutex::default(),
@@ -220,6 +222,49 @@ fn repeated_editor_creation_releases_owned_memory() {
     assert!(
         growth < 64 * 1024,
         "Editor teardown retained {growth} bytes"
+    );
+}
+
+#[test]
+fn distinct_parameter_addresses_do_not_accumulate_editor_memory() {
+    // Ordinary teardown loops may reuse the same allocator addresses. Keep all
+    // parameter sets alive until their editors close to exercise fresh identities.
+    // egui's debug ID source map is process-global, so pointer-based widget IDs
+    // would otherwise retain strings for each address even after editor teardown.
+    let render_and_drop = |parameters| {
+        let mut test = Harness::with_params(Vec2::new(1152.0, 768.0), parameters);
+        let host = Arc::downgrade(&test.host);
+        let meters = Arc::downgrade(&test.editor.meters);
+        test.editor.file_panel = true;
+        test.editor.settings_panel = true;
+        test.editor.bands_panel = true;
+        // Include processing selectors and all band scopes, as well as knobs
+        // and switches on the main surface.
+        for band in 0..8 {
+            test.editor.selected = band;
+            test.frame(vec![], Modifiers::NONE);
+        }
+        drop(test);
+        assert!(host.upgrade().is_none());
+        assert!(meters.upgrade().is_none());
+    };
+    for _ in 0..4 {
+        render_and_drop(Arc::new(LullabyParams::default()));
+    }
+    let baseline = crate::allocation_tests::live_bytes(false);
+    let params: Vec<_> = (0..48)
+        .map(|_| Arc::new(LullabyParams::default()))
+        .collect();
+    for parameters in &params {
+        render_and_drop(parameters.clone());
+        assert_eq!(Arc::strong_count(parameters), 1);
+    }
+    drop(params);
+    let growth = crate::allocation_tests::live_bytes(false) - baseline;
+    eprintln!("Editor live heap growth after 48 distinct parameter addresses: {growth} bytes");
+    assert!(
+        growth < 64 * 1024,
+        "Distinct editor identities retained {growth} bytes"
     );
 }
 

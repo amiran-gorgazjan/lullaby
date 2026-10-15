@@ -124,7 +124,7 @@ pub fn param_switch(
         ui,
         c,
         rect,
-        param as *const BoolParam as usize,
+        ("param_switch", param.name()),
         param.value(),
         label,
     )
