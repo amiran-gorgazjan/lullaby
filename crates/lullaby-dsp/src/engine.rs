@@ -81,6 +81,8 @@ impl Channel {
 /// Weighted overlap-add FFT engine. Construction/reset/configuration happen outside processing.
 /// Sample calls perform no allocation, locking, I/O, or FFT planning.
 pub struct Engine {
+    #[cfg(test)]
+    reference_filter: bool,
     #[cfg(feature = "dsp-diagnostics")]
     trace_frames: u64,
     #[cfg(feature = "dsp-diagnostics")]
@@ -166,6 +168,8 @@ impl Engine {
         }
         spread_kernel_offsets.push(kernel_count);
         Self {
+            #[cfg(test)]
+            reference_filter: false,
             #[cfg(feature = "dsp-diagnostics")]
             trace_frames: 0,
             #[cfg(feature = "dsp-diagnostics")]
@@ -731,12 +735,14 @@ impl Engine {
                 self.forward
                     .process_with_scratch(&mut ch.filter, &mut self.scratch);
             }
-            for k in 0..self.n {
-                let filtered = ch.spectrum[k] * ch.filter[k].exp();
-                let bin = k.min(self.n - k);
-                ch.detector[k] = (ch.spectrum[k] - filtered) * self.audition_mask[bin];
-                ch.spectrum[k] = filtered;
+            #[cfg(test)]
+            if self.reference_filter {
+                apply_reference_filter(ch, &self.audition_mask);
+            } else {
+                apply_symmetric_filter(ch, &self.audition_mask, s.phase);
             }
+            #[cfg(not(test))]
+            apply_symmetric_filter(ch, &self.audition_mask, s.phase);
             self.inverse
                 .process_with_scratch(&mut ch.spectrum, &mut self.scratch);
             // Skip the audition IFFT unless the fade is audible or audition is requested.
@@ -779,6 +785,59 @@ impl Engine {
                 );
             }
         }
+    }
+}
+
+fn apply_symmetric_filter(ch: &mut Channel, audition_mask: &[f32], phase: Phase) {
+    // The input and real cepstrum describe real signals, so the response at
+    // negative frequencies is the conjugate of the positive-frequency response.
+    // Exponentiating only one side avoids redundant exp/sin/cos calls. Keep each
+    // original input FFT bin, rather than forcing its finite-precision mirror.
+    if phase == Phase::Minimum {
+        apply_filter_pairs::<true>(ch, audition_mask);
+    } else {
+        apply_filter_pairs::<false>(ch, audition_mask);
+    }
+}
+
+fn apply_filter_pairs<const MINIMUM_PHASE: bool>(ch: &mut Channel, audition_mask: &[f32]) {
+    let n = ch.spectrum.len();
+    for (k, &mask) in audition_mask.iter().enumerate() {
+        let gain = if MINIMUM_PHASE {
+            ch.filter[k].exp()
+        } else {
+            // Linear phase stores a purely real log gain. Its complex exp has
+            // zero phase, so no trigonometry or complex multiply is necessary.
+            Complex32::new(ch.filter[k].re.exp(), 0.0)
+        };
+        let filtered = if MINIMUM_PHASE {
+            ch.spectrum[k] * gain
+        } else {
+            ch.spectrum[k] * gain.re
+        };
+        ch.detector[k] = (ch.spectrum[k] - filtered) * mask;
+        ch.spectrum[k] = filtered;
+        if k != 0 && k != n / 2 {
+            let negative = n - k;
+            let filtered = if MINIMUM_PHASE {
+                ch.spectrum[negative] * gain.conj()
+            } else {
+                ch.spectrum[negative] * gain.re
+            };
+            ch.detector[negative] = (ch.spectrum[negative] - filtered) * mask;
+            ch.spectrum[negative] = filtered;
+        }
+    }
+}
+
+#[cfg(test)]
+fn apply_reference_filter(ch: &mut Channel, audition_mask: &[f32]) {
+    let n = ch.spectrum.len();
+    for k in 0..n {
+        let filtered = ch.spectrum[k] * ch.filter[k].exp();
+        let bin = k.min(n - k);
+        ch.detector[k] = (ch.spectrum[k] - filtered) * audition_mask[bin];
+        ch.spectrum[k] = filtered;
     }
 }
 
@@ -845,6 +904,136 @@ fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn paired_linear_filter_matches_full_complex_exp_at_every_bin() {
+        for n in [512, 2048] {
+            let mut paired = Channel::new(n);
+            let mut reference = Channel::new(n);
+            let mut mask = vec![0.0; n / 2 + 1];
+            for (k, mask) in mask.iter_mut().enumerate() {
+                // Include unity, extreme attenuation, DC and Nyquist. Input
+                // bins deliberately need not be exact conjugates: reuse the
+                // response, never discard either input bin's FFT roundoff.
+                let cut = if k % 3 == 0 { 0.0 } else { (k % 61) as f32 };
+                let log_gain = Complex32::new(-cut * std::f32::consts::LN_10 / 20.0, 0.0);
+                paired.filter[k] = log_gain;
+                reference.filter[k] = log_gain;
+                if k != 0 && k != n / 2 {
+                    paired.filter[n - k] = log_gain;
+                    reference.filter[n - k] = log_gain;
+                }
+                *mask = (k % 19) as f32 / 18.0;
+            }
+            for k in 0..n {
+                let value = Complex32::new((k as f32 * 0.13).sin(), (k as f32 * 0.17).cos());
+                paired.spectrum[k] = value;
+                reference.spectrum[k] = value;
+            }
+            apply_symmetric_filter(&mut paired, &mask, Phase::Linear);
+            apply_reference_filter(&mut reference, &mask);
+            assert_eq!(paired.spectrum, reference.spectrum);
+            assert_eq!(paired.detector, reference.detector);
+        }
+    }
+
+    #[test]
+    fn conjugate_filter_matches_reference_through_phase_and_audition_changes() {
+        for quality in [
+            Quality::LowLatency,
+            Quality::Normal,
+            Quality::High,
+            Quality::Ultra,
+        ] {
+            for mono in [false, true] {
+                let sample_rate = if mono { 96000.0 } else { 48000.0 };
+                let mut paired = Engine::new(sample_rate, quality, mono);
+                let mut reference = Engine::new(sample_rate, quality, mono);
+                reference.reference_filter = true;
+                let mut settings = Settings {
+                    quality,
+                    mode: Mode::Hard,
+                    depth: 10.0,
+                    attack: 0.0,
+                    release: 0.0,
+                    ..Default::default()
+                };
+                settings.bands[0] = crate::Band::bell(1056.0, 8.0, 1.3);
+                settings.bands[1] = crate::Band::bell(6500.0, -5.0, 2.0);
+                let mut noise = 0x9182_abcd_u32;
+                let mut squared_error = 0.0_f64;
+                let mut values = 0;
+                // Longer than an audition fade, including phase changes while
+                // it fades out. Also exercise reset and non-conjugate stereo
+                // input histories as L/R <-> M/S and sidechain are automated.
+                let stage_len = sample_rate as usize / 8;
+                for i in 0..stage_len * 7 {
+                    if i % stage_len == 0 {
+                        let stage = i / stage_len;
+                        settings.phase = if stage.is_multiple_of(2) {
+                            Phase::Minimum
+                        } else {
+                            Phase::Linear
+                        };
+                        settings.listen_band = if stage == 1 || stage == 4 { 0 } else { -1 };
+                        settings.external_sidechain = stage.is_multiple_of(3);
+                        settings.stereo_mode = if stage % 3 == 1 {
+                            StereoMode::MidSide
+                        } else {
+                            StereoMode::LeftRight
+                        };
+                        settings.depth = if stage == 5 { 0.0 } else { 10.0 };
+                        if stage == 6 {
+                            paired.reset();
+                            reference.reset();
+                        }
+                        paired.set_settings(settings);
+                        reference.set_settings(settings);
+                    }
+                    noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let random = noise as i32 as f32 / i32::MAX as f32;
+                    let input = [
+                        (i as f32 * 0.13823).sin() * 0.25 + random * 0.05,
+                        (i as f32 * 0.041).sin() * 0.11 - random * 0.03,
+                    ];
+                    let key = [input[1] * 0.5, input[0] * 0.3];
+                    let actual = paired.process_sample(input, key);
+                    let expected = reference.process_sample(input, key);
+                    for c in 0..2 {
+                        let error = actual[c] - expected[c];
+                        assert!(error.is_finite());
+                        assert!(
+                            error.abs() <= 0.00002,
+                            "quality={quality:?}, mono={mono}, sample={i}, channel={c}, error={error}"
+                        );
+                        squared_error += f64::from(error).powi(2);
+                        values += 1;
+                    }
+                    if paired.take_frame_ready() {
+                        assert!(reference.take_frame_ready());
+                        assert_eq!(paired.meter.input_db, reference.meter.input_db);
+                        assert_eq!(paired.meter.reduction_db, reference.meter.reduction_db);
+                        assert_eq!(
+                            paired.meter.peak_reduction_db,
+                            reference.meter.peak_reduction_db
+                        );
+                        for (actual, expected) in paired.channels.iter().zip(&reference.channels) {
+                            assert_eq!(actual.reduction, expected.reduction);
+                            assert_eq!(actual.filter, expected.filter);
+                            assert_eq!(actual.requested, expected.requested);
+                            #[cfg(feature = "dsp-diagnostics")]
+                            {
+                                assert_eq!(actual.trace.target, expected.trace.target);
+                                assert_eq!(actual.trace.spread, expected.trace.spread);
+                                assert_eq!(actual.trace.prominence, expected.trace.prominence);
+                            }
+                        }
+                    }
+                }
+                assert!((squared_error / values as f64).sqrt() <= 0.000001);
+            }
+        }
+    }
 
     #[test]
     fn sparse_index_rebuilds_after_dense_and_silent_frames_without_growing() {
