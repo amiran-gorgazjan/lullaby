@@ -1054,6 +1054,7 @@ name = "lullaby"
 version = "0.2.1"
 dependencies = [
  "egui",
+ "libloading",
  "lullaby-dsp",
  "nice-plug",
  "nice-plug-egui",

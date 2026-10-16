@@ -46,3 +46,30 @@ This permits only small floating-point differences; it does not authorize
 changed detector laws, reduced quality, skipped automation, latency changes,
 approximate math or different audio behavior. Existing behavior, allocation,
 diagnostic and VST3 integration tests remain required.
+
+## Native VST3 wrapper comparison
+
+The separate `vst3_performance` example loads a trusted native Lullaby shared
+library through its exported VST3 factory. It measures only synchronous audio
+callbacks, including the wrapper, with 64/128/512-sample blocks, 48/96 kHz and
+all quality modes. Both builds use the same host executable. Input preparation,
+activation, output capture and disk writes are outside timed callbacks. Reported
+percentiles refer to real VST3 callbacks. The editor stays closed; FL Studio and
+open-editor behavior still need a manual test.
+
+```sh
+cargo build --release --locked --example vst3_performance
+cargo build --release --locked -p lullaby
+python3 scripts/performance.py \
+  --baseline target/release/examples/vst3_performance \
+  --candidate target/release/examples/vst3_performance \
+  --baseline-plugin /path/to/previous/Lullaby.vst3/Contents/MacOS/Lullaby \
+  --candidate-plugin target/release/liblullaby.dylib \
+  --output target/vst3-performance --pairs 9 --frames 96000
+```
+
+Pass the actual native library inside the platform bundle, not the bundle
+directory. On Windows use its `.vst3` library; on Linux use its `.so` library.
+Only load trusted builds: loading a native plugin executes its code. The same
+paired statistical and audio gate applies, with seven VST3 workloads. Captures
+contain stereo output, while the Engine probe additionally includes meters.

@@ -3,6 +3,8 @@ import pathlib
 import tempfile
 import unittest
 import array
+import subprocess
+import sys
 
 spec = importlib.util.spec_from_file_location("performance", pathlib.Path(__file__).with_name("performance.py"))
 performance = importlib.util.module_from_spec(spec)
@@ -40,6 +42,14 @@ class PerformanceTests(unittest.TestCase):
             self.assertFalse(performance.compare_audio(a,b)["audio_pass"])
             b.write_bytes(array.array("f",[float("nan"),.2,.3]).tobytes())
             with self.assertRaises(ValueError): performance.compare_audio(a,b)
+
+    def test_native_probe_requires_both_plugin_paths(self):
+        command = [sys.executable, str(pathlib.Path(performance.__file__)),
+                   "--baseline", "unused", "--candidate", "unused", "--output", "unused",
+                   "--baseline-plugin", "unused"]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("both plugin paths are required together", result.stderr)
 
 
 if __name__ == "__main__":

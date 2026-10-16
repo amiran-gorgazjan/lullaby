@@ -63,24 +63,34 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", required=True, type=pathlib.Path)
     parser.add_argument("--candidate", required=True, type=pathlib.Path)
+    parser.add_argument("--baseline-plugin", type=pathlib.Path,
+                        help="native library for a dynamic VST3 probe")
+    parser.add_argument("--candidate-plugin", type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--pairs", type=int, default=9)
     parser.add_argument("--frames", type=int, default=24000)
     args = parser.parse_args()
     if args.pairs < 5:
         parser.error("at least five paired trials are required")
+    if bool(args.baseline_plugin) != bool(args.candidate_plugin):
+        parser.error("both plugin paths are required together")
     args.output.mkdir(parents=True, exist_ok=True)
-    def run(exe, capture=None):
+    def run(exe, capture=None, plugin=None):
         cmd = [str(exe.resolve()),"--frames",str(args.frames)]
+        if plugin: cmd += ["--plugin",str(plugin.resolve())]
         if capture: cmd += ["--capture",str(capture)]
         return json.loads(subprocess.check_output(cmd,text=True))
     # Unmeasured process warmups also capture deterministic outputs.
-    run(args.baseline,args.output/"baseline.f32")
-    run(args.candidate,args.output/"candidate.f32")
+    run(args.baseline,args.output/"baseline.f32",args.baseline_plugin)
+    run(args.candidate,args.output/"candidate.f32",args.candidate_plugin)
     pairs = []
     for i in range(args.pairs):
-        if i % 2: after, before = run(args.candidate), run(args.baseline)
-        else: before, after = run(args.baseline), run(args.candidate)
+        if i % 2:
+            after = run(args.candidate,plugin=args.candidate_plugin)
+            before = run(args.baseline,plugin=args.baseline_plugin)
+        else:
+            before = run(args.baseline,plugin=args.baseline_plugin)
+            after = run(args.candidate,plugin=args.candidate_plugin)
         pairs.append([before,after])
         print(f"completed paired trial {i+1}/{args.pairs}",file=sys.stderr,flush=True)
         (args.output/"trials.json").write_text(json.dumps(pairs,indent=2)+"\n")

@@ -20,6 +20,10 @@ nice-plug-egui = "=0.5.1"
 egui = "0.36.1"
 serde_json = "1.0"
 
+[dev-dependencies]
+# Already present in the locked dependency graph; used only by the native VST3 probe.
+libloading = "=0.8.9"
+
 [profile.dev]
 opt-level = 1
 
