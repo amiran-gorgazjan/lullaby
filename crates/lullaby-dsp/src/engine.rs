@@ -83,6 +83,12 @@ impl Channel {
 pub struct Engine {
     #[cfg(test)]
     reference_filter: bool,
+    #[cfg(test)]
+    reference_linked: bool,
+    #[cfg(test)]
+    shared_spread_frames: usize,
+    #[cfg(test)]
+    shared_filter_frames: usize,
     #[cfg(feature = "dsp-diagnostics")]
     trace_frames: u64,
     #[cfg(feature = "dsp-diagnostics")]
@@ -112,6 +118,8 @@ pub struct Engine {
     spread_kernel_offsets: Vec<usize>,
     spread_kernel_lower: Vec<usize>,
     spread_kernel: Vec<f32>,
+    // Common post-link envelope, allocated once and used only for exact matches.
+    shared_spread: Vec<f32>,
     kernel_peak: Vec<f32>,
     kernel_peak_distance_squared: Vec<f32>,
     kernel_exponent: Vec<f32>,
@@ -170,6 +178,12 @@ impl Engine {
         Self {
             #[cfg(test)]
             reference_filter: false,
+            #[cfg(test)]
+            reference_linked: false,
+            #[cfg(test)]
+            shared_spread_frames: 0,
+            #[cfg(test)]
+            shared_filter_frames: 0,
             #[cfg(feature = "dsp-diagnostics")]
             trace_frames: 0,
             #[cfg(feature = "dsp-diagnostics")]
@@ -203,6 +217,7 @@ impl Engine {
             spread_kernel_offsets,
             spread_kernel_lower,
             spread_kernel: vec![0.0; kernel_count],
+            shared_spread: vec![0.0; n / 2 + 1],
             kernel_peak: vec![0.0; n / 2 + 1],
             kernel_peak_distance_squared: vec![0.0; n / 2 + 1],
             kernel_exponent: vec![0.0; n / 2 + 1],
@@ -667,13 +682,30 @@ impl Engine {
                 ch.requested[k] += s.link * (shared - ch.requested[k]);
             }
         }
-        for ch in &mut self.channels {
-            let sparse = index_nonzero_requests(
-                &ch.requested,
-                &mut ch.requested_nonzero,
-                &mut ch.requested_nonzero_prefix,
-                bins / 8,
-            );
+        // Full linking usually leaves identical requested cuts, but its float
+        // arithmetic can still differ by an ulp. Reuse only actual equal arrays,
+        // after both independent detectors have finished. Focus weights and old
+        // smoothing states remain independent even while the envelope is shared.
+        let share_spread =
+            s.link == 1.0 && self.channels[0].requested == self.channels[1].requested;
+        #[cfg(test)]
+        let share_spread = share_spread && !self.reference_linked;
+        #[cfg(test)]
+        if share_spread {
+            self.shared_spread_frames += 1;
+        }
+        for c in 0..2 {
+            let (previous, current) = self.channels.split_at_mut(c);
+            let previous = previous.first();
+            let ch = &mut current[0];
+            let reuse_spread = share_spread && c == 1;
+            let sparse = !reuse_spread
+                && index_nonzero_requests(
+                    &ch.requested,
+                    &mut ch.requested_nonzero,
+                    &mut ch.requested_nonzero_prefix,
+                    bins / 8,
+                );
             // Indexed loads only pay off for very sparse cuts. Dense frames
             // keep the original contiguous traversal for cache/vectorization.
             // Zero cuts have exactly zero contribution through finite Gaussian
@@ -683,7 +715,9 @@ impl Engine {
                 let upper = self.spread_upper[k];
                 let start = self.spread_kernel_offsets[k] + lower - self.spread_kernel_lower[k];
                 let weights = &self.spread_kernel[start..start + upper - lower];
-                let spread = if sparse {
+                let spread = if reuse_spread {
+                    self.shared_spread[k]
+                } else if sparse {
                     let nonzero = &ch.requested_nonzero
                         [ch.requested_nonzero_prefix[lower]..ch.requested_nonzero_prefix[upper]];
                     maximum_sparse_weighted_request(
@@ -696,6 +730,9 @@ impl Engine {
                 } else {
                     maximum_weighted_request(ch.requested[k], &ch.requested[lower..upper], weights)
                 };
+                if share_spread && c == 0 {
+                    self.shared_spread[k] = spread;
+                }
                 let target = if k == 0 {
                     0.0
                 } else {
@@ -719,7 +756,18 @@ impl Engine {
             for k in 1..self.n / 2 {
                 ch.filter[self.n - k] = ch.filter[k];
             }
-            if s.phase == Phase::Minimum {
+            if s.phase == Phase::Minimum
+                && share_spread
+                && previous.is_some_and(|previous| previous.reduction == ch.reduction)
+            {
+                // The actual smoothed reductions must match, not just the new
+                // targets: relinking must not erase unequal release histories.
+                ch.filter.copy_from_slice(&previous.unwrap().filter);
+                #[cfg(test)]
+                {
+                    self.shared_filter_frames += 1;
+                }
+            } else if s.phase == Phase::Minimum {
                 // Real cepstrum -> causal minimum-phase spectrum, recomputed each frame.
                 self.inverse
                     .process_with_scratch(&mut ch.filter, &mut self.scratch);
@@ -904,6 +952,162 @@ fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn linked_sharing_matches_reference_through_focus_and_history_changes() {
+        for quality in [
+            Quality::LowLatency,
+            Quality::Normal,
+            Quality::High,
+            Quality::Ultra,
+        ] {
+            for mono in [false, true] {
+                let mut shared = Engine::new(48000.0, quality, mono);
+                let mut reference = Engine::new(48000.0, quality, mono);
+                reference.reference_linked = true;
+                let mut saw_unequal_reductions = false;
+                let mut saw_unequal_weights = false;
+                for stage in 0..11 {
+                    let mut settings = Settings {
+                        quality,
+                        mode: if stage == 8 { Mode::Soft } else { Mode::Hard },
+                        depth: if stage == 9 { 0.0 } else { 10.0 },
+                        attack: 1.0,
+                        release: 7.0,
+                        focus: if stage == 1 { 0.7 } else { 0.0 },
+                        link: match stage {
+                            4 => 0.35,
+                            5 => 0.0,
+                            _ => 1.0,
+                        },
+                        phase: if stage == 7 {
+                            Phase::Linear
+                        } else {
+                            Phase::Minimum
+                        },
+                        stereo_mode: if stage == 7 {
+                            StereoMode::MidSide
+                        } else {
+                            StereoMode::LeftRight
+                        },
+                        external_sidechain: stage == 7 || stage == 8,
+                        listen_band: if stage == 7 { 0 } else { -1 },
+                        max_cut_db: if stage == 8 { 3.0 } else { 18.0 },
+                        ..Default::default()
+                    };
+                    settings.bands[0] = crate::Band::bell(1056.0, 8.0, 1.3);
+                    settings.bands[0].focus = if stage == 3 { -0.8 } else { 0.0 };
+                    if stage == 10 {
+                        shared.reset();
+                        reference.reset();
+                    }
+                    shared.set_settings(settings);
+                    reference.set_settings(settings);
+                    let start_spread = shared.shared_spread_frames;
+                    for i in 0..8192 {
+                        let sample = stage * 8192 + i;
+                        let t = sample as f32 / 48000.0;
+                        // Very different spectral contexts, including a much
+                        // quieter opposite-channel resonance. Sharing happens
+                        // only after both independent requests are computed.
+                        let left = (t * std::f32::consts::TAU * 1056.0).sin() * 0.4;
+                        let right = if mono {
+                            left
+                        } else {
+                            (t * std::f32::consts::TAU * 3217.0).sin() * 0.025
+                                + (t * std::f32::consts::TAU * 40.0).sin() * 0.2
+                        };
+                        let input = [left, right];
+                        let key = [right * 0.2, left * 0.7];
+                        let previous_filter_count = shared.shared_filter_frames;
+                        assert_eq!(
+                            shared.process_sample(input, key),
+                            reference.process_sample(input, key),
+                            "quality={quality:?}, mono={mono}, stage={stage}, sample={i}"
+                        );
+                        if shared.take_frame_ready() {
+                            assert!(reference.take_frame_ready());
+                            assert_eq!(shared.meter.input_db, reference.meter.input_db);
+                            assert_eq!(shared.meter.reduction_db, reference.meter.reduction_db);
+                            assert_eq!(
+                                shared.meter.peak_reduction_db,
+                                reference.meter.peak_reduction_db
+                            );
+                            for (actual, expected) in
+                                shared.channels.iter().zip(&reference.channels)
+                            {
+                                assert_eq!(actual.magnitude_db, expected.magnitude_db);
+                                assert_eq!(actual.requested, expected.requested);
+                                assert_eq!(actual.reduction, expected.reduction);
+                                assert_eq!(actual.filter, expected.filter);
+                                #[cfg(feature = "dsp-diagnostics")]
+                                {
+                                    assert_eq!(
+                                        actual.reference.values(),
+                                        expected.reference.values()
+                                    );
+                                    assert_eq!(actual.trace.requested, expected.trace.requested);
+                                    assert_eq!(actual.trace.spread, expected.trace.spread);
+                                    assert_eq!(actual.trace.target, expected.trace.target);
+                                    assert_eq!(actual.trace.prominence, expected.trace.prominence);
+                                    assert_eq!(actual.trace.activity, expected.trace.activity);
+                                }
+                            }
+                            if shared.channels[0].reduction != shared.channels[1].reduction {
+                                saw_unequal_reductions = true;
+                                assert_eq!(shared.shared_filter_frames, previous_filter_count);
+                            }
+                            saw_unequal_weights |=
+                                shared.channels[0].weight != shared.channels[1].weight;
+                        }
+                    }
+                    if settings.link != 1.0 {
+                        assert_eq!(shared.shared_spread_frames, start_spread);
+                    }
+                }
+                assert!(shared.shared_spread_frames > 0);
+                assert!(shared.shared_filter_frames > 0);
+                assert!(saw_unequal_reductions);
+                assert!(saw_unequal_weights);
+                assert_eq!(reference.shared_spread_frames, 0);
+                assert_eq!(reference.shared_filter_frames, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn equal_linked_requests_do_not_discard_unequal_smoothing_history() {
+        let mut shared = Engine::new(48000.0, Quality::Normal, false);
+        let mut reference = Engine::new(48000.0, Quality::Normal, false);
+        reference.reference_linked = true;
+        let settings = Settings {
+            link: 1.0,
+            release: 10.0,
+            ..Default::default()
+        };
+        shared.set_settings(settings);
+        reference.set_settings(settings);
+        // A prior focus/partial-link interval can leave unequal reductions even
+        // after current targets become equal. Silence makes both requests exactly
+        // zero while the deliberately different old cuts release independently.
+        for engine in [&mut shared, &mut reference] {
+            engine.channels[0].reduction[50] = 3.0;
+            engine.channels[1].reduction[50] = 6.0;
+        }
+        for _ in 0..4096 {
+            assert_eq!(
+                shared.process_sample([0.0; 2], [0.0; 2]),
+                reference.process_sample([0.0; 2], [0.0; 2])
+            );
+        }
+        assert!(shared.shared_spread_frames > 0);
+        assert_eq!(shared.shared_filter_frames, 0);
+        assert_ne!(shared.channels[0].reduction, shared.channels[1].reduction);
+        for (actual, expected) in shared.channels.iter().zip(&reference.channels) {
+            assert_eq!(actual.reduction, expected.reduction);
+            assert_eq!(actual.filter, expected.filter);
+        }
+    }
 
     #[test]
     fn paired_linear_filter_matches_full_complex_exp_at_every_bin() {
