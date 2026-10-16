@@ -1,3 +1,5 @@
 [alias]
-xtask = "run --package xtask --release --"
+# The packaging helper reuses the dev dependencies already built by tests.
+# Flags after `bundle`, including --release, still select the plugin profile.
+xtask = "run --package xtask --"
 

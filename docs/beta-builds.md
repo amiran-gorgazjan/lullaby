@@ -22,7 +22,9 @@ The macOS build runs the AU smoke test and strict Apple `auval`. The Intel job
 extracts the Apple Silicon job's universal archive with executable modes preserved,
 checks both Mach-O slices and code signatures, and runs CLAP/AU smoke tests plus
 `auval` natively on Intel. A final collection job requires all three packages and
-all preceding checks to pass.
+all preceding checks to pass. Intel validation starts as soon as the macOS build
+finishes, in parallel with any remaining Windows/Linux work. The native build
+steps live in a shared reusable workflow so every platform retains the same gates.
 
 The AU validator stages and verifies the complete temporary component before
 publishing it atomically, then waits up to 60 seconds for discovery. CI explicitly
@@ -77,7 +79,24 @@ extraction. The notice generator validates registry archives against lockfile
 SHA-256 checksums and fails when required texts or dependencies are missing. AU
 repositories are fetched and checked before the offline release build. Release
 bundles use default plugin features: diagnostic tests do not enable diagnostics in
-the distributed plugin. Build output directories are not restored from CI caches.
+the distributed plugin.
+
+CI also caches Cargo dependency intermediates for the exact runner image,
+architecture, Rust compiler, workflow/configuration and build flags. Restore keys
+allow reuse when workspace source or lockfile versions change; Cargo still checks
+dependency fingerprints. Before running checks, `cargo clean --workspace` removes
+workspace artifacts, with explicit `--release` cleaning for the native and both
+macOS release targets. The
+plugin, DSP and packaging helper are always compiled from the current checkout.
+Bundles, build receipts, ZIPs, AU native build output, top-level plugin binaries
+and incremental compilation state are excluded from this cache. The existing
+receipt freshness and native loading checks remain mandatory.
+
+CI omits dev/test debug symbols to reduce compilation time and cache size; debug
+assertions, overflow checks, allocation guards and test coverage remain enabled.
+The packaging helper uses the dev profile and reuses test dependencies; its
+`bundle --release` argument still builds the distributed plugin with the unchanged
+optimized release profile (thin LTO, one codegen unit).
 
 `SOURCE_DATE_EPOCH` is the source commit's Unix timestamp. ZIP entry ordering,
 timestamps and permissions are normalized, so packaging the **same bundle bytes,

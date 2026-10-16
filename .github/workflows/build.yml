@@ -15,17 +15,9 @@ concurrency:
   group: beta-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-  CARGO_TERM_COLOR: always
-  MACOSX_DEPLOYMENT_TARGET: '11.0'
-  PYTHONUTF8: '1'
-  PYTHONDONTWRITEBYTECODE: '1'
-
 jobs:
-  build:
+  build-other:
     name: Build ${{ matrix.platform }}
-    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -36,140 +28,23 @@ jobs:
           - os: windows-2022
             platform: Windows-x86_64
             target: x86_64-pc-windows-msvc
-          - os: macos-15
-            platform: macOS-universal
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12.10'
-      - name: Packaging and licensing regression tests
-        run: python -m unittest discover -s scripts -p 'test_*.py' -v
-      - name: Fix the archive timestamp to the source commit
-        run: |
-          python - <<'PY'
-          import os, subprocess
-          epoch = subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'], text=True).strip()
-          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == os.environ['GITHUB_SHA']
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
-              out.write(f'SOURCE_DATE_EPOCH={epoch}\n')
-          PY
-      - name: Linux GUI build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxcursor-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev libxcb-dri2-0-dev libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev
-      - name: Install the exact Rust toolchain
-        run: |
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
-          rustup target add --toolchain 1.95.0 "${{ matrix.target }}"
-          rustc --version --verbose
-          cargo --version --verbose
-      - name: Add the Intel Rust target for universal macOS binaries
-        if: runner.os == 'macOS'
-        run: rustup target add --toolchain 1.95.0 x86_64-apple-darwin
-      - name: Install the exact AU build tool
-        if: runner.os == 'macOS'
-        run: |
-          python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps 'cmake==3.31.10'
-          cmake --version
-          xcodebuild -version
-          xcrun --show-sdk-version
-          xcrun clang++ --version
-      # Cache complete dependency archives/sources for license generation, never
-      # target/ binaries. Cargo.lock and the AU pins still control resolution.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .cache/cargo/registry/index
-            .cache/cargo/registry/cache
-            .cache/cargo/registry/src
-            .cache/cargo/git/db
-            .cache/cargo/git/checkouts
-            .cache/au
-          key: beta-dependencies-${{ matrix.os }}-rust-1.95.0-${{ hashFiles('Cargo.lock', 'packaging/au/dependencies.json') }}
-      - name: Fetch all locked Cargo dependencies
-        run: cargo fetch --locked
-      - name: Fetch exact AU dependency commits
-        if: runner.os == 'macOS'
-        run: python scripts/build_au.py --fetch-dependencies-only
-      - name: Formatting and default-feature lint
-        run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets --locked --offline -- -D warnings
-      - name: Native Rust tests, including the VST3 host integration tests
-        run: cargo test --workspace --all-targets --locked --offline
-      - name: Optional offline diagnostics tests
-        run: cargo test -p lullaby-dsp --all-targets --locked --offline --features dsp-diagnostics
-      - name: Generate complete dependency notices from verified archives
-        run: python scripts/dependency_notices.py --output target/beta-notices/THIRD-PARTY-NOTICES.txt --manifest target/beta-notices/manifest.json
-      - name: Record the start of the release build
-        run: |
-          python - <<'PY'
-          import os, time
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
-              out.write(f'BUILD_STARTED_EPOCH={int(time.time())}\n')
-          PY
-      - name: Build native VST3 and CLAP with default features
-        if: runner.os != 'macOS'
-        run: cargo xtask bundle lullaby --release --locked --offline
-      - name: Build universal VST3, CLAP and AU with default features
-        if: runner.os == 'macOS'
-        run: cargo xtask bundle-au lullaby --release --locked --offline --universal
-      - name: Test the packaged native CLAP binary
-        run: |
-          python - <<'PY'
-          import pathlib, subprocess, sys
-          binary = pathlib.Path('target/bundled/Lullaby.clap')
-          if sys.platform == 'darwin':
-              binary /= 'Contents/MacOS/Lullaby'
-          assert binary.is_file(), binary
-          subprocess.run([sys.executable, 'scripts/clap_smoke.py', str(binary)], check=True)
-          PY
-      - name: Validate the universal macOS bundles on Apple Silicon
-        if: runner.os == 'macOS'
-        run: |
-          test "$(uname -m)" = arm64
-          for bundle in target/bundled/Lullaby.vst3 target/bundled/Lullaby.clap target/bundled/Lullaby.component; do
-            codesign --verify --deep --strict "$bundle"
-            for arch in arm64 x86_64; do
-              lipo "$bundle/Contents/MacOS/Lullaby" -verify_arch "$arch"
-            done
-          done
-          python scripts/auval.py --ci-refresh-registrar
-      - name: Record verified build provenance
-        run: python scripts/package_release.py --platform '${{ matrix.platform }}' --bundles target/bundled --receipt target/beta-build.json --record-build --build-start "$BUILD_STARTED_EPOCH"
-      - name: Create and verify the beta archive
-        run: |
-          python scripts/package_release.py --platform '${{ matrix.platform }}' --bundles target/bundled --receipt target/beta-build.json --output target/beta-packages
-          python - <<'PY'
-          import os, pathlib, subprocess, sys
-          archives = list(pathlib.Path('target/beta-packages').glob('*.zip'))
-          assert len(archives) == 1, archives
-          subprocess.run([sys.executable, 'scripts/package_release.py', '--check', str(archives[0]), '--expected-commit', os.environ['GITHUB_SHA']], check=True)
-          PY
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          # Keep successful builds available when only a downstream job is
-          # retried. Downloads are scoped to this workflow run, and every ZIP
-          # is still checked against the exact source commit.
-          name: beta-${{ matrix.platform }}-${{ github.sha }}
-          path: target/beta-packages/*
-          overwrite: true
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: ${{ matrix.os }}
+      platform: ${{ matrix.platform }}
+      target: ${{ matrix.target }}
+
+  build-macos:
+    name: Build macOS-universal
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      os: macos-15
+      platform: macOS-universal
+      target: aarch64-apple-darwin
 
   macos-intel-validation:
     name: Validate the same universal package on Intel
-    needs: build
+    needs: build-macos
     runs-on: macos-15-intel
     timeout-minutes: 20
     defaults:
@@ -221,7 +96,7 @@ jobs:
 
   beta-packages:
     name: Collect validated private beta packages
-    needs: [build, macos-intel-validation]
+    needs: [build-other, build-macos, macos-intel-validation]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
