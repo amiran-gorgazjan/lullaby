@@ -36,6 +36,10 @@ struct Channel {
     magnitude_db: Vec<f32>,
     reduction: Vec<f32>,
     requested: Vec<f32>,
+    // Bounded at construction; index construction never grows past this bin
+    // count and is abandoned early when the frame is too dense to benefit.
+    requested_nonzero: Vec<usize>,
+    requested_nonzero_prefix: Vec<usize>,
     weight: Vec<f32>,
 }
 
@@ -55,6 +59,8 @@ impl Channel {
             magnitude_db: vec![0.0; n / 2 + 1],
             reduction: vec![0.0; n / 2 + 1],
             requested: vec![0.0; n / 2 + 1],
+            requested_nonzero: Vec::with_capacity(n / 2 + 1),
+            requested_nonzero_prefix: vec![0; n / 2 + 2],
             weight: vec![0.0; n / 2 + 1],
         }
     }
@@ -658,15 +664,34 @@ impl Engine {
             }
         }
         for ch in &mut self.channels {
+            let sparse = index_nonzero_requests(
+                &ch.requested,
+                &mut ch.requested_nonzero,
+                &mut ch.requested_nonzero_prefix,
+                bins / 8,
+            );
+            // Indexed loads only pay off for very sparse cuts. Dense frames
+            // keep the original contiguous traversal for cache/vectorization.
+            // Zero cuts have exactly zero contribution through finite Gaussian
+            // weights; every nonzero source retains its original product.
             for k in 0..bins {
-                let mut spread = ch.requested[k];
                 let lower = self.spread_lower[k];
                 let upper = self.spread_upper[k];
                 let start = self.spread_kernel_offsets[k] + lower - self.spread_kernel_lower[k];
                 let weights = &self.spread_kernel[start..start + upper - lower];
-                for (&requested, &weight) in ch.requested[lower..upper].iter().zip(weights) {
-                    spread = spread.max(requested * weight);
-                }
+                let spread = if sparse {
+                    let nonzero = &ch.requested_nonzero
+                        [ch.requested_nonzero_prefix[lower]..ch.requested_nonzero_prefix[upper]];
+                    maximum_sparse_weighted_request(
+                        ch.requested[k],
+                        &ch.requested,
+                        lower,
+                        weights,
+                        nonzero,
+                    )
+                } else {
+                    maximum_weighted_request(ch.requested[k], &ch.requested[lower..upper], weights)
+                };
                 let target = if k == 0 {
                     0.0
                 } else {
@@ -757,6 +782,55 @@ impl Engine {
     }
 }
 
+fn index_nonzero_requests(
+    requested: &[f32],
+    nonzero: &mut Vec<usize>,
+    prefix: &mut [usize],
+    limit: usize,
+) -> bool {
+    debug_assert!(limit > 0);
+    debug_assert_eq!(prefix.len(), requested.len() + 1);
+    nonzero.clear();
+    for (i, &request) in requested.iter().enumerate() {
+        prefix[i] = nonzero.len();
+        if request != 0.0 {
+            nonzero.push(i);
+            // The partial index is never consumed by dense traversal. Stop
+            // constructing it as soon as indexed loads cannot pay off.
+            if nonzero.len() >= limit {
+                return false;
+            }
+        }
+    }
+    prefix[requested.len()] = nonzero.len();
+    true
+}
+
+#[inline]
+fn maximum_sparse_weighted_request(
+    initial: f32,
+    requested: &[f32],
+    lower: usize,
+    weights: &[f32],
+    nonzero: &[usize],
+) -> f32 {
+    let mut maximum = initial;
+    for &i in nonzero {
+        maximum = maximum.max(requested[i] * weights[i - lower]);
+    }
+    maximum
+}
+
+#[inline]
+fn maximum_weighted_request(initial: f32, requested: &[f32], weights: &[f32]) -> f32 {
+    debug_assert_eq!(requested.len(), weights.len());
+    let mut spread = initial;
+    for (&request, &weight) in requested.iter().zip(weights) {
+        spread = spread.max(request * weight);
+    }
+    spread
+}
+
 // Kept separate from exp() calls so the source-normalization arithmetic can
 // vectorize. Scratch storage is bounded at construction and shared by channels.
 fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [f32], width: f32) {
@@ -771,6 +845,99 @@ fn fill_kernel_normalization(sources: &[f32], peaks: &mut [f32], squared: &mut [
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn sparse_index_rebuilds_after_dense_and_silent_frames_without_growing() {
+        let mut requested = [1.0; 64];
+        let mut nonzero = Vec::with_capacity(requested.len());
+        let mut prefix = vec![usize::MAX; requested.len() + 1];
+        let capacity = nonzero.capacity();
+        assert!(!index_nonzero_requests(
+            &requested,
+            &mut nonzero,
+            &mut prefix,
+            8
+        ));
+        assert_eq!(nonzero, (0..8).collect::<Vec<_>>());
+        requested.fill(0.0);
+        requested[63] = f32::MIN_POSITIVE;
+        assert!(index_nonzero_requests(
+            &requested,
+            &mut nonzero,
+            &mut prefix,
+            8
+        ));
+        assert_eq!(nonzero, [63]);
+        assert_eq!(prefix[..64], [0; 64]);
+        assert_eq!(prefix[64], 1);
+        requested.fill(0.0);
+        assert!(index_nonzero_requests(
+            &requested,
+            &mut nonzero,
+            &mut prefix,
+            8
+        ));
+        assert!(nonzero.is_empty());
+        assert_eq!(prefix, [0; 65]);
+        assert_eq!(nonzero.capacity(), capacity);
+    }
+
+    #[test]
+    fn sparse_spread_matches_scalar_across_densities_and_ranges() {
+        // All-zero input, every sparsity, both range boundaries, subnormal and
+        // extreme finite products. Skipping a zero cannot lose a contribution
+        // because requested cuts and Gaussian weights are nonnegative/finite.
+        let mut random = 0x9367_ab45_u32;
+        let mut requested = vec![0.0; 257];
+        let mut weights = vec![0.0; 257];
+        let mut nonzero = Vec::with_capacity(requested.len());
+        let mut prefix = vec![0; requested.len() + 1];
+        for density in [0, 1, 3, 17, 64, 128, 257] {
+            for i in 0..requested.len() {
+                random = random.wrapping_mul(1664525).wrapping_add(1013904223);
+                requested[i] = if (random as usize % 257) < density {
+                    match i % 17 {
+                        1 => f32::MIN_POSITIVE,
+                        2 => f32::MAX,
+                        _ => (random >> 8) as f32 * (60.0 / 16777216.0),
+                    }
+                } else {
+                    0.0
+                };
+                random = random.wrapping_mul(1664525).wrapping_add(1013904223);
+                weights[i] = (random >> 8) as f32 / 16777216.0;
+            }
+            assert!(index_nonzero_requests(
+                &requested,
+                &mut nonzero,
+                &mut prefix,
+                requested.len() + 1
+            ));
+            for lower in 0..=requested.len() {
+                for upper in lower..=requested.len() {
+                    for initial in [0.0, 0.5, 60.0] {
+                        let expected = maximum_weighted_request(
+                            initial,
+                            &requested[lower..upper],
+                            &weights[lower..upper],
+                        );
+                        let actual = maximum_sparse_weighted_request(
+                            initial,
+                            &requested,
+                            lower,
+                            &weights[lower..upper],
+                            &nonzero[prefix[lower]..prefix[upper]],
+                        );
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "density={density}, range={lower}..{upper}, initial={initial}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn alternating_controls_match_forced_full_coefficient_rebuilds() {
