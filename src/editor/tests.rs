@@ -74,6 +74,14 @@ impl Harness {
         test
     }
     fn frame(&mut self, events: Vec<Event>, modifiers: Modifiers) {
+        self.inspect_frame(events, modifiers, |_| {});
+    }
+    fn inspect_frame(
+        &mut self,
+        events: Vec<Event>,
+        modifiers: Modifiers,
+        inspect: impl FnOnce(&egui::FullOutput),
+    ) {
         self.time += 0.05;
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
@@ -86,6 +94,7 @@ impl Harness {
         let setter = self.gui.param_setter();
         let mut output = self.ctx.run_ui(input, |ui| self.editor.draw(ui, &setter));
         assert!(!output.shapes.is_empty());
+        inspect(&output);
         let meshes = self
             .ctx
             .tessellate(std::mem::take(&mut output.shapes), output.pixels_per_point);
@@ -401,6 +410,148 @@ fn graph_double_click_adds_an_existing_weighting_band() {
     assert!((band.frequency.value() - expected_hz).abs() < 0.1);
     assert!(band.depth_db.value() > 0.0);
     assert_eq!(test.host.params.depth.value(), 3.0);
+}
+
+#[test]
+fn band_settings_width_stays_stable_during_a_held_node_drag() {
+    for scale in [1.0, 0.75, 0.625] {
+        let mut test = Harness::new(theme::SIZE * scale);
+        let setter = test.gui.param_setter();
+        test.host.params.bands[0].apply(lullaby_dsp::Band::bell(1000.0, 0.0, 1.0), &setter);
+        let start = pos2(
+            (470.0 + (1000.0_f32 / 20.0).log10() / 3.0 * 972.0) * scale,
+            (231.0 + 351.0 / 2.0) * scale,
+        );
+        test.frame(vec![Event::PointerMoved(start)], Modifiers::NONE);
+        test.host.events.lock().unwrap().clear();
+        test.pointer(start, true, Modifiers::NONE);
+        let held = start + Vec2::new(-12.0, -12.0) * scale;
+        test.frame(vec![Event::PointerMoved(held)], Modifiers::NONE);
+        assert!(
+            test.editor.bands_panel,
+            "drag should open the band settings"
+        );
+        assert!(test.host.params.bands[0].frequency.value() < 1000.0);
+        assert!(test.host.params.bands[0].depth_db.value() > 0.0);
+        // Let the window complete its first layout pass, then keep the mouse
+        // held for several seconds. Content measurement must not feed an ever
+        // larger width back into the next frame.
+        test.frame(vec![], Modifiers::NONE);
+        let window_id = test.ctx.memory(|memory| {
+            memory
+                .layer_ids()
+                .find(|layer| layer.order == egui::Order::Middle)
+                .expect("band settings layer should exist")
+                .id
+        });
+        let width = || {
+            test.ctx.memory(|memory| {
+                memory
+                    .area_rect(window_id)
+                    .expect("band settings window should exist")
+                    .width()
+            })
+        };
+        let initial = width();
+        assert!((initial - 590.0).abs() <= 1.0, "initial width={initial}");
+        let mut last_pointer = held;
+        for frame in 0..90 {
+            let events = if frame < 30 {
+                vec![]
+            } else {
+                // Cross Hz/kHz formatting and positive/negative depth while
+                // keeping the original node gesture captured.
+                let phase = (frame - 30) as f32 / 59.0;
+                last_pointer = pos2(
+                    (470.0 + 972.0 * phase) * scale,
+                    (231.0 + 351.0 / 2.0 + 70.0 * (phase * 2.0 - 1.0)) * scale,
+                );
+                vec![Event::PointerMoved(last_pointer)]
+            };
+            test.frame(events, Modifiers::NONE);
+            let current = test
+                .ctx
+                .memory(|memory| memory.area_rect(window_id).unwrap().width());
+            assert!(
+                (current - initial).abs() <= 1.0,
+                "scale={scale}, frame={frame}: band settings width grew from {initial} to {current}"
+            );
+        }
+        test.pointer(last_pointer, false, Modifiers::NONE);
+        let events = test.host.events.lock().unwrap();
+        for param in ["Frequency", "Band depth"] {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.0 == "begin" && event.1 == param)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event.0 == "end" && event.1 == param)
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn band_value_entry_uses_the_readout_slot_without_widening_settings() {
+    let mut test = Harness::new(Vec2::new(960.0, 640.0));
+    let setter = test.gui.param_setter();
+    let band = &test.host.params.bands[0];
+    band.apply(lullaby_dsp::Band::bell(918.3, 0.0, 1.0), &setter);
+    let value = band.frequency.to_string();
+    test.editor.bands_panel = true;
+    test.frame(vec![], Modifiers::NONE);
+    let mut readout = None;
+    fn find_text(shape: &egui::Shape, value: &str) -> Option<Rect> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == value => {
+                Some(Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find_text(shape, value)),
+            _ => None,
+        }
+    }
+    test.inspect_frame(vec![], Modifiers::NONE, |output| {
+        readout = output
+            .shapes
+            .iter()
+            .find_map(|shape| find_text(&shape.shape, &value));
+    });
+    let window_id = test.ctx.memory(|memory| {
+        memory
+            .layer_ids()
+            .find(|layer| layer.order == egui::Order::Middle)
+            .unwrap()
+            .id
+    });
+    let initial = test
+        .ctx
+        .memory(|memory| memory.area_rect(window_id).unwrap().width());
+    test.click(
+        readout
+            .expect("frequency readout should be visible")
+            .center(),
+    );
+    assert!(test.ctx.memory(|memory| memory.focused().is_some()));
+    test.replace_text("19999 Hz");
+    for _ in 0..30 {
+        test.frame(vec![], Modifiers::NONE);
+        let current = test
+            .ctx
+            .memory(|memory| memory.area_rect(window_id).unwrap().width());
+        assert!(
+            (current - initial).abs() <= 1.0,
+            "direct value entry grew window from {initial} to {current}"
+        );
+    }
+    test.key(egui::Key::Enter);
+    assert!((test.host.params.bands[0].frequency.value() - 19999.0).abs() < 0.1);
 }
 
 #[test]

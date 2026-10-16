@@ -175,6 +175,8 @@ impl LullabyEditor {
                 .open(&mut open)
                 .default_pos(c.p(470.0, 642.0))
                 .default_width(590.0)
+                .min_width(590.0)
+                .max_width(590.0)
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -243,9 +245,28 @@ fn slider(ui: &mut egui::Ui, param: &FloatParam, setter: &ParamSetter) {
             Vec2::new(86.0, 22.0),
             egui::Label::new(RichText::new(param.name()).size(12.0)),
         );
-        ui.add(
-            ParamSlider::for_param(param, setter)
-                .with_width((ui.available_width() - 78.0).max(35.0)),
-        );
+        // ParamSlider's width covers only its track. Its value button (including
+        // theme padding and spacing) also has to fit in this row. A fixed 78px
+        // allowance was too small for e.g. "918.3 Hz", so columns overflowed
+        // and the window's automatic content sizing grew it again every frame.
+        let value_width = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    param.to_string(),
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    ui.visuals().text_color(),
+                )
+                .size()
+                .x
+        }) + 2.0 * ui.spacing().button_padding.x;
+        let value_width = value_width.ceil().max(78.0);
+        let track_width =
+            (ui.available_width() - value_width - ui.spacing().item_spacing.x).max(35.0);
+        ui.scope(|ui| {
+            // Keep direct value entry within the same readout slot. The default
+            // TextEdit width would otherwise expand this row when it is focused.
+            ui.spacing_mut().text_edit_width = value_width;
+            ui.add(ParamSlider::for_param(param, setter).with_width(track_width));
+        });
     });
 }
