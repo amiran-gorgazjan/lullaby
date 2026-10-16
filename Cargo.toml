@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "lullaby"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license-file = "LICENSE"
 publish = false
