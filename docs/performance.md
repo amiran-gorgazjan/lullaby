@@ -1,5 +1,8 @@
 # Measuring processing CPU
 
+See [the first optimization round](performance-results.md) for measured results
+and accepted/rejected hypotheses.
+
 Use an optimized build on an otherwise idle machine. The probe measures the
 actual `Engine` used by the plugin, including block settings updates, analysis,
 filtering, metering and sample output. It excludes construction, FFT planning,
