@@ -7,7 +7,7 @@ Version 0.2.2 reduces processing CPU use, with about 41% less processing time fo
 the default preset in local macOS VST3 tests against 0.2.1. Results vary by setup.
 Quality, latency, controls and saved parameter IDs are unchanged.
 
-This is a private evaluation build. Keep your previous version available and
+This is a beta build. Keep your previous version available and
 save a copy of an important project before trying the beta.
 
 ## What's included
@@ -32,7 +32,7 @@ Automated build and format checks do not establish compatibility with every DAW
 or operating-system version. Please report your OS, processor, DAW version,
 plugin format and Lullaby version when giving feedback. An audio example and
 steps to reproduce a problem are especially useful. Send reports through the
-private beta channel provided with your download.
+beta channel provided with your download.
 
 ## Package verification and notices
 
@@ -43,6 +43,5 @@ THIRD-PARTY-NOTICES.txt and DEPENDENCY-MANIFEST.json with the package. The latte
 records dependency source identities and notice hashes. AU-specific dependency notices are also
 inside the component bundle.
 
-The source-license notices preserve existing rights and third-party notices;
-they are not a new customer EULA. Commercial customer terms are being arranged
-separately with the owner.
+LICENSE contains the MIT terms for Lullaby's project-owned code. Fonts and
+third-party dependencies are covered by their accompanying notices.

@@ -1,21 +1,21 @@
-Lullaby — proprietary development
+MIT License
 
-Copyright (c) 2026 Lullaby contributors. All rights reserved, except as
-provided by an applicable existing or separate license.
+Copyright (c) 2026 Lullaby contributors
 
-Project-owned changes that have not previously been distributed under an
-open-source license, and future project-owned work, are proprietary. This
-file grants no permission to use, copy, modify, distribute, sublicense or
-sell those changes. Such permission requires a separate written license
-from the relevant rights holder.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-This does not revoke or restrict any rights already granted for previously
-distributed versions or portions of Lullaby. The original MIT notice for
-the published baseline is preserved in licenses/MIT-BASELINE.txt. That
-notice continues to apply to the portions covered by the existing grant.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Third-party software, fonts and other materials retain their own copyright
-and license terms. This file does not replace their licenses.
-
-See docs/licensing.md for the project licensing boundary. Customer license
-terms for a commercial release will be established separately.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
