@@ -3,9 +3,9 @@
 Lullaby is an adaptive resonance suppressor. It helps soften harsh frequencies
 while preserving the character of a sound.
 
-Version 0.2.2 reduces processing CPU use, with about 41% less processing time for
-the default preset in local macOS VST3 tests against 0.2.1. Results vary by setup.
-Quality, latency, controls and saved parameter IDs are unchanged.
+Version 0.2.3 fixes VST3 sidechain layout negotiation, sample-rate setup and
+bypass readback during processing. CLAP hosts can now parse the displayed names
+of discrete parameter choices.
 
 This is a beta build. Keep your previous version available and
 save a copy of an important project before trying the beta.

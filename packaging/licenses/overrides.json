@@ -334,6 +334,7 @@
       "name": "nice-plug",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "upstream_commit": "91ba75d20c43ca0cd21afa802d0ae8c0511f48ed",
+      "vendored_manifest": "packaging/vendor/nice-plug/Cargo.toml",
       "version": "0.4.2"
     },
     "nice-plug-core-0.4.2": {

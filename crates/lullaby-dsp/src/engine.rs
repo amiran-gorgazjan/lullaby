@@ -146,8 +146,13 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Whether the engine can process audio at the requested sample rate in Hz.
+    pub fn supports_sample_rate(sample_rate: f64) -> bool {
+        (8_000.0..=384_000.0).contains(&sample_rate)
+    }
+
     pub fn new(sample_rate: f32, quality: Quality, mono: bool) -> Self {
-        assert!(sample_rate.is_finite() && (8000.0..=384000.0).contains(&sample_rate));
+        assert!(Self::supports_sample_rate(f64::from(sample_rate)));
         let n = quality.fft_size();
         let hop = n / quality.overlap();
         let mut planner = FftPlanner::new();

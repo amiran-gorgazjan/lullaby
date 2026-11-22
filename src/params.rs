@@ -172,28 +172,37 @@ impl Default for LullabyParams {
             delta: BoolParam::new("Delta", false),
             external_sidechain: BoolParam::new("External sidechain", false),
             sidechain_listen: BoolParam::new("Listen to sidechain", false),
-            mode: IntParam::new("Mode", 0, IntRange::Linear { min: 0, max: 1 })
-                .with_value_to_string(std::sync::Arc::new(|v| {
-                    ["Soft", "Hard"][v as usize].to_owned()
-                })),
-            stereo_mode: IntParam::new("Channels", 0, IntRange::Linear { min: 0, max: 1 })
-                .with_value_to_string(std::sync::Arc::new(|v| {
-                    ["L/R", "M/S"][v as usize].to_owned()
-                })),
-            phase: IntParam::new("Phase", 0, IntRange::Linear { min: 0, max: 1 })
-                .with_value_to_string(std::sync::Arc::new(|v| {
-                    ["Minimum", "Linear"][v as usize].to_owned()
-                })),
-            quality: IntParam::new("Quality", 0, IntRange::Linear { min: 0, max: 3 })
-                .with_value_to_string(std::sync::Arc::new(|v| {
-                    ["Normal", "High", "Ultra", "Low latency"][v as usize].to_owned()
-                }))
+            mode: labeled_int_param("Mode", &["Soft", "Hard"]),
+            stereo_mode: labeled_int_param("Channels", &["L/R", "M/S"]),
+            phase: labeled_int_param("Phase", &["Minimum", "Linear"]),
+            quality: labeled_int_param("Quality", &["Normal", "High", "Ultra", "Low latency"])
                 .non_automatable(),
             listen_band: IntParam::new("Band audition", -1, IntRange::Linear { min: -1, max: 7 })
                 .non_automatable(),
             bands: std::array::from_fn(BandParams::new),
         }
     }
+}
+
+fn labeled_int_param(name: &'static str, labels: &'static [&'static str]) -> IntParam {
+    IntParam::new(
+        name,
+        0,
+        IntRange::Linear {
+            min: 0,
+            max: labels.len() as i32 - 1,
+        },
+    )
+    .with_value_to_string(std::sync::Arc::new(move |value| {
+        labels[value as usize].to_owned()
+    }))
+    .with_string_to_value(std::sync::Arc::new(move |text| {
+        labels
+            .iter()
+            .position(|label| label.eq_ignore_ascii_case(text))
+            .map(|index| index as i32)
+            .or_else(|| text.parse().ok())
+    }))
 }
 
 impl LullabyParams {

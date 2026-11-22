@@ -95,6 +95,40 @@ class DependencyNoticeTests(unittest.TestCase):
         self.supplement(package, commit)
         self.assertIn("Pinned MIT license", self.render())
 
+    def test_vendored_crate_retains_upstream_notice_and_hashes_local_source(self):
+        package, _, commit = self.package(files={})
+        text = b"Pinned MIT license\n"
+        self.supplement(package, commit, path="LICENSE", text=text)
+        directory = self.root / "packaging/vendor/example"
+        (directory / "src").mkdir(parents=True)
+        manifest = directory / "Cargo.toml"
+        manifest.write_text("[package]\n", encoding="utf-8")
+        source = directory / "src/lib.rs"
+        source.write_text("// original source\n", encoding="utf-8")
+        license_file = directory / "LICENSE"
+        license_file.write_bytes(text)
+        (directory / ".cargo_vcs_info.json").write_text(
+            json.dumps({"git": {"sha1": commit}}), encoding="utf-8"
+        )
+        override = self.overrides["packages"]["example-1.0.0"]
+        override["vendored_manifest"] = manifest.relative_to(self.root).as_posix()
+        package["source"] = None
+        package["manifest_path"] = str(manifest)
+        self.locked = [{"name": package["name"], "version": package["version"]}]
+        self.flush()
+
+        report = self.render()
+        self.assertIn("Source: path+packaging/vendor/example", report)
+        self.assertIn("Upstream Cargo archive SHA-256: " + override["checksum"], report)
+        self.assertIn("Pinned MIT license", report)
+        self.assertNotIn(str(self.root), report)
+        source.write_text("// patched source\n", encoding="utf-8")
+        self.assertNotEqual(report, self.render())
+
+        license_file.write_bytes(b"Modified license\n")
+        with self.assertRaisesRegex(notices.NoticeError, "Vendored license differs"):
+            self.render()
+
     def test_override_content_tamper_fails(self):
         package, _, commit = self.package()
         target = self.supplement(package, commit)

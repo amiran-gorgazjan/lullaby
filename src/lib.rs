@@ -146,7 +146,7 @@ impl Plugin for Lullaby {
         config: &BufferConfig,
         context: &mut impl ActivateContext<Self>,
     ) -> bool {
-        if !config.sample_rate.is_finite() || !(8000.0..=384000.0).contains(&config.sample_rate) {
+        if !Engine::supports_sample_rate(f64::from(config.sample_rate)) {
             return false;
         }
         let s = self.params.snapshot();
@@ -236,6 +236,10 @@ impl Vst3Plugin for Lullaby {
     const VST3_CLASS_ID: [u8; 16] = *b"LullabyResonance";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Eq];
+
+    fn supports_vst3_sample_rate(sample_rate: f64) -> bool {
+        Engine::supports_sample_rate(sample_rate)
+    }
 }
 
 nice_export_clap!(Lullaby);

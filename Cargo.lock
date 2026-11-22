@@ -1051,7 +1051,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lullaby"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "egui",
  "libloading",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "lullaby-dsp"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "rustfft",
  "serde",
@@ -1134,8 +1134,6 @@ dependencies = [
 [[package]]
 name = "nice-plug"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f47be74bed3e8aa17bb055d4ff89af1fb016aa0d2756cd9b6c029a3743676a5"
 dependencies = [
  "anyhow",
  "anymap3",

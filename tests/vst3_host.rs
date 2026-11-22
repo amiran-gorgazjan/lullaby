@@ -18,6 +18,85 @@ static HOST_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 mod support;
 
 #[test]
+fn vst3_checks_sample_rates_during_setup() {
+    let _serial = HOST_TEST.lock().unwrap();
+    // Keep the real component and audio processor alive through negotiation.
+    unsafe {
+        let factory =
+            ComPtr::<IPluginFactory>::from_raw(lullaby::GetPluginFactory().cast()).unwrap();
+        let mut class: PClassInfo = std::mem::zeroed();
+        assert_eq!(factory.getClassInfo(0, &mut class), kResultOk);
+        let mut raw: *mut c_void = ptr::null_mut();
+        assert_eq!(
+            factory.createInstance(
+                class.cid.as_ptr(),
+                IComponent::IID.as_ptr().cast(),
+                &mut raw
+            ),
+            kResultOk
+        );
+        let component = ComPtr::<IComponent>::from_raw(raw.cast()).unwrap();
+        assert_eq!(component.initialize(ptr::null_mut()), kResultOk);
+        let processor = component.cast::<IAudioProcessor>().unwrap();
+
+        let setup_at = |sample_rate| {
+            processor.setupProcessing(&mut ProcessSetup {
+                processMode: 0,        // kRealtime
+                symbolicSampleSize: 0, // kSample32
+                maxSamplesPerBlock: 256,
+                sampleRate: sample_rate,
+            })
+        };
+        let minimum_rate = 8_000.0_f64;
+        let maximum_rate = 384_000.0_f64;
+
+        // These requests are outside the supported range at host precision, even
+        // though converting to f32 rounds them to the supported endpoints.
+        for sample_rate in [minimum_rate.next_down(), maximum_rate.next_up()] {
+            assert_ne!(
+                setup_at(sample_rate),
+                kResultOk,
+                "VST3 rounded an unsupported sample rate into range: {sample_rate} Hz"
+            );
+            assert_ne!(component.setActive(1), kResultOk);
+        }
+
+        for sample_rate in [minimum_rate, 44100.0, 48000.25, maximum_rate] {
+            assert_eq!(
+                setup_at(sample_rate),
+                kResultOk,
+                "VST3 setup at {sample_rate} Hz"
+            );
+            assert_eq!(
+                component.setActive(1),
+                kResultOk,
+                "VST3 activation at {sample_rate} Hz"
+            );
+            assert_eq!(component.setActive(0), kResultOk);
+        }
+        for sample_rate in [
+            1234.5678,
+            7999.0,
+            384001.0,
+            768000.0,
+            0.0,
+            f64::NAN,
+            f64::INFINITY,
+        ] {
+            assert_ne!(
+                setup_at(sample_rate),
+                kResultOk,
+                "VST3 accepted {sample_rate} Hz"
+            );
+        }
+        // Steinberg's validator reactivates after rejecting its last rate probe.
+        assert_eq!(component.setActive(1), kResultOk);
+        assert_eq!(component.setActive(0), kResultOk);
+        assert_eq!(component.terminate(), kResultOk);
+    }
+}
+
+#[test]
 fn vst3_depth_values_and_processed_audio_match_the_dsp() {
     let _serial = HOST_TEST.lock().unwrap();
     // All COM objects originate from this plugin's factory. Buffers outlive

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate deterministic notices from the exact locked Cargo source archives.
+"""Generate deterministic notices for locked Cargo archives and vendored source.
 
 Python 3.9+, standard library only. No downloads are performed here: run Cargo's
 locked dependency fetch first. This intentionally includes the complete lock
@@ -156,6 +156,34 @@ def _source_notices(package, checksum):
     return found, upstream_commit
 
 
+def _vendored_source(package, override, root):
+    manifest_path = override["vendored_manifest"]
+    manifest = _relative_file(root, manifest_path)
+    name = package["name"] + "-" + package["version"]
+    if package.get("source") or Path(package["manifest_path"]).resolve() != manifest.resolve():
+        raise NoticeError("Vendored Cargo manifest mismatch: " + name)
+    if (override.get("name"), override.get("version")) != (package["name"], package["version"]):
+        raise NoticeError("Vendored Cargo identity mismatch: " + name)
+    if not override.get("source", "").startswith("registry+") or not HEX256.fullmatch(override.get("checksum", "")):
+        raise NoticeError("Missing vendored Cargo archive provenance: " + name)
+
+    directory = PurePosixPath(manifest_path).parent
+    vcs_info = _relative_file(root, (directory / ".cargo_vcs_info.json").as_posix())
+    upstream_commit = json.loads(vcs_info.read_bytes())["git"]["sha1"]
+    license_path = (directory / "LICENSE").as_posix()
+    license_data = _relative_file(root, license_path).read_bytes()
+
+    # Hash the tracked build inputs independently of paths on the build machine.
+    source_paths = [manifest, *sorted((manifest.parent / "src").rglob("*.rs"))]
+    source_hashes = {
+        path.relative_to(manifest.parent).as_posix():
+        _sha(_relative_file(root, path.relative_to(root).as_posix()).read_bytes())
+        for path in source_paths
+    }
+    checksum = _sha(json.dumps(source_hashes, sort_keys=True).encode("utf-8"))
+    return "path+" + directory.as_posix(), checksum, upstream_commit, license_data
+
+
 def _collect(metadata, *, root=ROOT, lock_path=None):
     root = Path(root)
     lock_path = Path(lock_path) if lock_path else root / "Cargo.lock"
@@ -171,23 +199,37 @@ def _collect(metadata, *, root=ROOT, lock_path=None):
     if overrides_data.get("schema_version") != 1:
         raise NoticeError("Unsupported dependency-notice override schema")
     overrides = overrides_data["packages"]
+    vendored = [
+        package for package in metadata["packages"]
+        if not package.get("source")
+        and "vendored_manifest" in overrides.get(package["name"] + "-" + package["version"], {})
+    ]
     used = set()
     records = []
-    for package in sorted(external, key=lambda p: (p["name"], p["version"], p["source"])):
+    for package in sorted(external + vendored, key=lambda p: (p["name"], p["version"], p["source"] or "")):
         identity = (package["name"], package["version"], package["source"])
         name = package["name"] + "-" + package["version"]
-        checksum = locked[identity]
-        files, upstream_commit = _source_notices(package, checksum)
+        override = overrides.get(name)
+        vendored_manifest = override and "vendored_manifest" in override
+        source = package["source"]
+        if vendored_manifest:
+            source, checksum, upstream_commit, vendored_license = _vendored_source(package, override, root)
+            files = {}
+        else:
+            checksum = locked[identity]
+            files, upstream_commit = _source_notices(package, checksum)
         texts = []
         for path, data in sorted(files.items()):
             texts.append({"path": path, "sha256": _sha(data), "text": _text(data, name + "/" + path), "origin": "locked-crate", "license_text": path == package.get("license_file")})
-        override = overrides.get(name)
+        vendored_license_verified = False
         if override is not None:
             expected = (override.get("name"), override.get("version"), override.get("source"))
-            if expected != identity or override.get("checksum") != checksum:
+            if not vendored_manifest and (expected != identity or override.get("checksum") != checksum):
                 raise NoticeError("Override source-package mismatch: " + name)
             if not upstream_commit or override.get("upstream_commit") != upstream_commit or not HEX160.fullmatch(upstream_commit):
                 raise NoticeError("Override upstream commit mismatch: " + name)
+            if name in used:
+                raise NoticeError("Duplicate dependency-notice override use: " + name)
             used.add(name)
             for file in sorted(override["files"], key=lambda f: (f["path"], f["url"])):
                 url = file["url"]
@@ -196,7 +238,11 @@ def _collect(metadata, *, root=ROOT, lock_path=None):
                 data = _relative_file(root, file["path"]).read_bytes()
                 if not HEX256.fullmatch(file.get("sha256", "")) or _sha(data) != file["sha256"]:
                     raise NoticeError("Override content checksum mismatch: " + file["path"])
+                if vendored_manifest and _notice_name(file["path"]) and data == vendored_license:
+                    vendored_license_verified = True
                 texts.append({"path": file["path"], "url": url, "sha256": _sha(data), "text": _text(data, file["path"]), "origin": "pinned-supplement", "license_text": file.get("license_text", False) is True})
+        if vendored_manifest and not vendored_license_verified:
+            raise NoticeError("Vendored license differs from pinned upstream notice: " + name)
         # r-efi's reviewed, checksum-pinned AUTHORS actually contains its license.
         # An arbitrary attribution-only AUTHORS cannot stand in for license text.
         if not any(_notice_name(text["path"]) or text["path"].endswith("/MIT.txt") or text.get("license_text") for text in texts):
@@ -204,10 +250,13 @@ def _collect(metadata, *, root=ROOT, lock_path=None):
         if not package.get("license") and not package.get("license_file"):
             raise NoticeError("Missing Cargo license declaration: " + name)
         records.append({
-            "name": package["name"], "version": package["version"], "source": package["source"],
+            "name": package["name"], "version": package["version"], "source": source,
             "checksum": checksum, "license": package.get("license"),
             "repository": package.get("repository"), "texts": texts,
         })
+        if vendored_manifest:
+            records[-1]["upstream_source"] = override["source"]
+            records[-1]["upstream_checksum"] = override["checksum"]
     unused = sorted(set(overrides) - used)
     if unused:
         raise NoticeError("Stale dependency-notice overrides: " + ", ".join(unused))
@@ -241,10 +290,18 @@ def dependency_notices(metadata, *, root=ROOT, lock_path=None):
         "Cargo.lock SHA-256: " + manifest["cargo_lock_sha256"],
     ]
     for package in manifest["packages"]:
+        if "upstream_checksum" in package:
+            source_digest = (
+                "Vendored source SHA-256: " + package["checksum"] + "\n"
+                + "Upstream registry: " + package["upstream_source"] + "\n"
+                + "Upstream Cargo archive SHA-256: " + package["upstream_checksum"] + "\n"
+            )
+        else:
+            source_digest = "Cargo archive SHA-256: " + package["checksum"] + "\n"
         chunks += ["=" * 72,
             package["name"] + "-" + package["version"] + "\n"
             + "Source: " + package["source"] + "\n"
-            + "Cargo archive SHA-256: " + package["checksum"] + "\n"
+            + source_digest
             + "Declared license: " + (package["license"] or "See license_file") + "\n"
             + "Repository: " + (package["repository"] or "Not declared")]
         for notice in package["texts"]:

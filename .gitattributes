@@ -4,3 +4,4 @@
 *.wav binary
 # Pinned upstream legal texts retain their original ending blank lines.
 packaging/licenses/** whitespace=-blank-at-eof
+packaging/vendor/nice-plug/LICENSE whitespace=-blank-at-eof
