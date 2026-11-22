@@ -14,8 +14,13 @@ use std::{
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK_SIZE: usize = 256;
+// VST3's generated enum types vary by platform, while these API fields are i32.
+#[allow(clippy::unnecessary_cast)]
 const SAMPLE_32: i32 = SymbolicSampleSizes_::kSample32 as i32;
+#[allow(clippy::unnecessary_cast)]
 const REALTIME: i32 = ProcessModes_::kRealtime as i32;
+#[allow(clippy::unnecessary_cast)]
+const SEEK_START: i32 = SeekMode::kIBSeekSet as i32;
 const BYPASS_FLAG: i32 = ParameterInfo_::ParameterFlags_::kIsBypass;
 
 #[test]
@@ -90,10 +95,7 @@ fn vst3_bypass_controller_clears_pending_edits_on_stop_and_state_load() {
         assert_eq!(controller.getParamNormalized(bypass), 0.0);
 
         assert_eq!(controller.setParamNormalized(bypass, 1.0), kResultOk);
-        assert_eq!(
-            stream.seek(0, SeekMode::kIBSeekSet as i32, ptr::null_mut()),
-            kResultOk
-        );
+        assert_eq!(stream.seek(0, SEEK_START, ptr::null_mut()), kResultOk);
         assert_eq!(component.setState(stream.as_ptr()), kResultOk);
         assert_eq!(controller.getParamNormalized(bypass), 0.0);
         assert_eq!(processor.setProcessing(0), kResultOk);
@@ -191,7 +193,7 @@ fn vst3_bypass_audio_waits_for_event_offset_and_state_round_trips() {
         assert_eq!(processor.setProcessing(0), kResultOk);
 
         assert_eq!(
-            enabled_stream.seek(0, SeekMode::kIBSeekSet as i32, ptr::null_mut()),
+            enabled_stream.seek(0, SEEK_START, ptr::null_mut()),
             kResultOk
         );
         assert_eq!(component.setState(enabled_stream.as_ptr()), kResultOk);
@@ -401,7 +403,7 @@ impl IBStreamTrait for StateStream {
     }
 
     unsafe fn seek(&self, pos: i64, mode: i32, result: *mut i64) -> tresult {
-        let from = match mode as u32 {
+        let from = match mode as IBStream_::IStreamSeekMode {
             SeekMode::kIBSeekSet if pos >= 0 => SeekFrom::Start(pos as u64),
             SeekMode::kIBSeekCur => SeekFrom::Current(pos),
             SeekMode::kIBSeekEnd => SeekFrom::End(pos),
